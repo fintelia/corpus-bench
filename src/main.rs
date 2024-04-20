@@ -1,4 +1,5 @@
 use std::{
+    hint::black_box,
     io::{Cursor, Write},
     path::PathBuf,
 };
@@ -108,6 +109,9 @@ fn main() {
         }
         Mode::Decode => {
             println!("Running decoding benchmark with corpus: {:?}", args.corpus);
+            measure_decode_qoi(&corpus);
+            measure_decode_webp(&corpus);
+            measure_decode_original(&corpus);
         }
     }
 }
@@ -221,4 +225,130 @@ fn zune_qoi_encode(corpus: &[PathBuf]) -> (f64, f64) {
         );
         buffer.write_all(&encoder.encode().unwrap()).unwrap()
     })
+}
+
+fn measure_decode_original(corpus: &[PathBuf]) {
+    let mut image_rs_total_time = 0;
+    let mut zune_png_total_time = 0;
+    let mut total_pixels = 0;
+
+    for path in corpus {
+        if let Ok(bytes) = std::fs::read(path) {
+            let start = std::time::Instant::now();
+            let Ok(image) = image::load_from_memory(&bytes) else {
+                continue;
+            };
+            let elapsed = start.elapsed();
+
+            let start2 = std::time::Instant::now();
+            let mut decoder = zune_png::PngDecoder::new(Cursor::new(bytes));
+            decoder.set_options(
+                zune_png::zune_core::options::DecoderOptions::new_fast()
+                    .set_max_width(usize::MAX)
+                    .set_max_height(usize::MAX),
+            );
+            black_box(decoder.decode().unwrap());
+            let elapsed2 = start2.elapsed();
+
+            image_rs_total_time += elapsed.as_nanos();
+            zune_png_total_time += elapsed2.as_nanos();
+            total_pixels += image.width() as u64 * image.height() as u64;
+        }
+    }
+    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (image_rs_total_time as f64 * 1e-9);
+    println!("image-rs PNG:  {:>6.1} MP/s", bandwidth);
+
+    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (zune_png_total_time as f64 * 1e-9);
+    println!("zune-png:      {:>6.1} MP/s", bandwidth);
+}
+
+fn measure_decode_webp(corpus: &[PathBuf]) {
+    let mut image_rs_total_time = 0;
+    let mut libwebp_total_time = 0;
+    let mut total_pixels = 0;
+
+    for path in corpus {
+        if let Ok(bytes) = std::fs::read(path) {
+            let Ok(image) = image::load_from_memory(&bytes) else {
+                continue;
+            };
+            if image.width() > 16383 || image.height() > 16383 {
+                continue;
+            }
+            let image: DynamicImage = if image.color().has_alpha() {
+                image.to_rgba8().into()
+            } else {
+                image.to_rgb8().into()
+            };
+
+            let mut encoded = Vec::new();
+            image
+                .write_to(&mut Cursor::new(&mut encoded), ImageFormat::WebP)
+                .unwrap();
+
+            let start = std::time::Instant::now();
+            black_box(image::load_from_memory(&encoded).unwrap());
+            let elapsed = start.elapsed();
+
+            let start2 = std::time::Instant::now();
+            black_box(webp::Decoder::new(&encoded).decode().unwrap());
+            let elapsed2 = start2.elapsed();
+
+            image_rs_total_time += elapsed.as_nanos();
+            libwebp_total_time += elapsed2.as_nanos();
+            total_pixels += image.width() as u64 * image.height() as u64;
+        }
+    }
+    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (image_rs_total_time as f64 * 1e-9);
+    println!("image-rs WebP: {:>6.1} MP/s", bandwidth);
+
+    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (libwebp_total_time as f64 * 1e-9);
+    println!("libwebp:       {:>6.1} MP/s", bandwidth);
+}
+
+fn measure_decode_qoi(corpus: &[PathBuf]) {
+    let mut image_rs_total_time = 0;
+    let mut zune_qoi_total_time = 0;
+    let mut total_pixels = 0;
+
+    for path in corpus {
+        if let Ok(bytes) = std::fs::read(path) {
+            let Ok(image) = image::load_from_memory(&bytes) else {
+                continue;
+            };
+            let image: DynamicImage = if image.color().has_alpha() {
+                image.to_rgba8().into()
+            } else {
+                image.to_rgb8().into()
+            };
+
+            let mut encoded = Vec::new();
+            image
+                .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Qoi)
+                .unwrap();
+
+            let start = std::time::Instant::now();
+            black_box(image::load_from_memory(&encoded).unwrap());
+            let elapsed = start.elapsed();
+
+            let start2 = std::time::Instant::now();
+            let mut decoder = zune_qoi::QoiDecoder::new_with_options(
+                encoded,
+                zune_qoi::zune_core::options::DecoderOptions::new_fast()
+                    .set_max_width(usize::MAX)
+                    .set_max_height(usize::MAX),
+            );
+            black_box(decoder.decode().unwrap());
+            let elapsed2 = start2.elapsed();
+
+            image_rs_total_time += elapsed.as_nanos();
+            zune_qoi_total_time += elapsed2.as_nanos();
+            total_pixels += image.width() as u64 * image.height() as u64;
+        }
+    }
+    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (image_rs_total_time as f64 * 1e-9);
+    println!("image-rs QOI:  {:>6.1} MP/s", bandwidth);
+
+    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (zune_qoi_total_time as f64 * 1e-9);
+    println!("zune-qoi:      {:>6.1} MP/s", bandwidth);
 }

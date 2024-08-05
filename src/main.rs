@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::{
     hint::black_box,
     io::{Cursor, Write},
@@ -36,11 +38,13 @@ enum Mode {
 enum Corpus {
     /// The QOI Benchmark corpus
     QoiBench,
+    CwebpQoiBench,
 }
 impl Corpus {
     fn get_corpus(&self) -> Vec<PathBuf> {
         let directory = match self {
             Corpus::QoiBench => "corpus/qoi_benchmark_suite",
+            Corpus::CwebpQoiBench => "corpus/cwebp_qoi_bench",
         };
 
         let mut paths = Vec::new();
@@ -109,11 +113,12 @@ fn main() {
         }
         Mode::Decode => {
             println!("Running decoding benchmark with corpus: {:?}", args.corpus);
-            measure_decode_qoi(&corpus);
+            // measure_decode_qoi(&corpus);
             measure_decode_webp(&corpus);
-            measure_decode_original(&corpus);
+            // measure_decode_original(&corpus);
         }
     }
+    innumerable::print_counts();
 }
 
 fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
@@ -228,78 +233,137 @@ fn zune_qoi_encode(corpus: &[PathBuf]) -> (f64, f64) {
 }
 
 fn measure_decode_original(corpus: &[PathBuf]) {
-    let mut image_rs_total_time = 0;
+    let mut image_png_total_time = 0;
     let mut zune_png_total_time = 0;
-    let mut total_pixels = 0;
+    let mut png_total_pixels = 0;
+
+    let mut image_webp_total_time = 0;
+    let mut libwebp_total_time = 0;
+    let mut webp_total_pixels = 0;
 
     for path in corpus {
         if let Ok(bytes) = std::fs::read(path) {
-            let start = std::time::Instant::now();
-            let Ok(image) = image::load_from_memory(&bytes) else {
-                continue;
-            };
-            let elapsed = start.elapsed();
+            match image::guess_format(&bytes) {
+                Ok(ImageFormat::Png) => {
+                    let start = std::time::Instant::now();
+                    let Ok(image) = image::load_from_memory(&bytes) else {
+                        continue;
+                    };
+                    let elapsed = start.elapsed();
 
-            let start2 = std::time::Instant::now();
-            let mut decoder = zune_png::PngDecoder::new(Cursor::new(bytes));
-            decoder.set_options(
-                zune_png::zune_core::options::DecoderOptions::new_fast()
-                    .set_max_width(usize::MAX)
-                    .set_max_height(usize::MAX),
-            );
-            black_box(decoder.decode().unwrap());
-            let elapsed2 = start2.elapsed();
+                    let start2 = std::time::Instant::now();
+                    let mut decoder = zune_png::PngDecoder::new(Cursor::new(bytes));
+                    decoder.set_options(
+                        zune_png::zune_core::options::DecoderOptions::new_fast()
+                            .set_max_width(usize::MAX)
+                            .set_max_height(usize::MAX),
+                    );
+                    black_box(decoder.decode().unwrap());
+                    let elapsed2 = start2.elapsed();
 
-            image_rs_total_time += elapsed.as_nanos();
-            zune_png_total_time += elapsed2.as_nanos();
-            total_pixels += image.width() as u64 * image.height() as u64;
+                    image_png_total_time += elapsed.as_nanos();
+                    zune_png_total_time += elapsed2.as_nanos();
+                    png_total_pixels += image.width() as u64 * image.height() as u64;
+                }
+                Ok(ImageFormat::WebP) => {
+                    let start = std::time::Instant::now();
+                    let Ok(image) = image::load_from_memory(&bytes) else {
+                        continue;
+                    };
+                    let elapsed = start.elapsed();
+
+                    let start2 = std::time::Instant::now();
+                    let decoder = webp::Decoder::new(&bytes);
+                    // black_box(decoder.decode().unwrap());
+                    let elapsed2 = start2.elapsed();
+
+                    image_webp_total_time += elapsed.as_nanos();
+                    libwebp_total_time += elapsed2.as_nanos();
+                    webp_total_pixels += image.width() as u64 * image.height() as u64;
+                }
+                _ => continue,
+            }
         }
     }
-    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (image_rs_total_time as f64 * 1e-9);
-    println!("image-rs PNG:  {:>6.1} MP/s", bandwidth);
+    if png_total_pixels > 0 {
+        let bandwidth =
+            (png_total_pixels as f64 / (1 << 20) as f64) / (image_png_total_time as f64 * 1e-9);
+        println!("image-rs PNG:  {:>6.1} MP/s", bandwidth);
 
-    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (zune_png_total_time as f64 * 1e-9);
-    println!("zune-png:      {:>6.1} MP/s", bandwidth);
+        let bandwidth =
+            (png_total_pixels as f64 / (1 << 20) as f64) / (zune_png_total_time as f64 * 1e-9);
+        println!("zune-png:      {:>6.1} MP/s", bandwidth);
+    }
+    if webp_total_pixels > 0 {
+        let bandwidth =
+            (webp_total_pixels as f64 / (1 << 20) as f64) / (image_webp_total_time as f64 * 1e-9);
+        println!("image-rs WebP: {:>6.1} MP/s", bandwidth);
+
+        let bandwidth =
+            (webp_total_pixels as f64 / (1 << 20) as f64) / (libwebp_total_time as f64 * 1e-9);
+        println!("libwebp:       {:>6.1} MP/s", bandwidth);
+    }
 }
 
 fn measure_decode_webp(corpus: &[PathBuf]) {
-    let mut image_rs_total_time = 0;
+    let mut image_webp_total_time = 0;
     let mut libwebp_total_time = 0;
     let mut total_pixels = 0;
 
     for path in corpus {
         if let Ok(bytes) = std::fs::read(path) {
-            let Ok(image) = image::load_from_memory(&bytes) else {
-                continue;
-            };
-            if image.width() > 16383 || image.height() > 16383 {
-                continue;
+            match image::guess_format(&bytes) {
+                Ok(ImageFormat::WebP) => {
+                    let start = std::time::Instant::now();
+                    let Ok(image) = image::load_from_memory(&bytes) else {
+                        continue;
+                    };
+                    let elapsed = start.elapsed();
+
+                    let start2 = std::time::Instant::now();
+                    let decoder = webp::Decoder::new(&bytes);
+                    black_box(decoder.decode().unwrap());
+                    let elapsed2 = start2.elapsed();
+
+                    image_webp_total_time += elapsed.as_nanos();
+                    libwebp_total_time += elapsed2.as_nanos();
+                    total_pixels += image.width() as u64 * image.height() as u64;
+                }
+                _ => {
+                    let Ok(image) = image::load_from_memory(&bytes) else {
+                        continue;
+                    };
+                    if image.width() > 16383 || image.height() > 16383 {
+                        continue;
+                    }
+                    let image: DynamicImage = if image.color().has_alpha() {
+                        image.to_rgba8().into()
+                    } else {
+                        image.to_rgb8().into()
+                    };
+
+                    let mut encoded = Vec::new();
+                    image
+                        .write_to(&mut Cursor::new(&mut encoded), ImageFormat::WebP)
+                        .unwrap();
+
+                    let start = std::time::Instant::now();
+                    black_box(image::load_from_memory(&encoded).unwrap());
+                    let elapsed = start.elapsed();
+
+                    let start2 = std::time::Instant::now();
+                    black_box(webp::Decoder::new(&encoded).decode().unwrap());
+                    let elapsed2 = start2.elapsed();
+
+                    image_webp_total_time += elapsed.as_nanos();
+                    libwebp_total_time += elapsed2.as_nanos();
+                    total_pixels += image.width() as u64 * image.height() as u64;
+                }
             }
-            let image: DynamicImage = if image.color().has_alpha() {
-                image.to_rgba8().into()
-            } else {
-                image.to_rgb8().into()
-            };
-
-            let mut encoded = Vec::new();
-            image
-                .write_to(&mut Cursor::new(&mut encoded), ImageFormat::WebP)
-                .unwrap();
-
-            let start = std::time::Instant::now();
-            black_box(image::load_from_memory(&encoded).unwrap());
-            let elapsed = start.elapsed();
-
-            let start2 = std::time::Instant::now();
-            black_box(webp::Decoder::new(&encoded).decode().unwrap());
-            let elapsed2 = start2.elapsed();
-
-            image_rs_total_time += elapsed.as_nanos();
-            libwebp_total_time += elapsed2.as_nanos();
-            total_pixels += image.width() as u64 * image.height() as u64;
         }
     }
-    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (image_rs_total_time as f64 * 1e-9);
+    let bandwidth =
+        (total_pixels as f64 / (1 << 20) as f64) / (image_webp_total_time as f64 * 1e-9);
     println!("image-rs WebP: {:>6.1} MP/s", bandwidth);
 
     let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (libwebp_total_time as f64 * 1e-9);

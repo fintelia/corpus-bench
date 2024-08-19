@@ -22,6 +22,9 @@ struct Args {
 
     #[arg(value_enum, index = 2)]
     corpus: Corpus,
+
+    #[arg(long)]
+    rust_only: bool,
 }
 
 /// The mode to run the benchmark in
@@ -114,7 +117,7 @@ fn main() {
         Mode::Decode => {
             println!("Running decoding benchmark with corpus: {:?}", args.corpus);
             // measure_decode_qoi(&corpus);
-            measure_decode_webp(&corpus);
+            measure_decode_webp(&corpus, args.rust_only);
             // measure_decode_original(&corpus);
         }
     }
@@ -305,7 +308,7 @@ fn measure_decode_original(corpus: &[PathBuf]) {
     }
 }
 
-fn measure_decode_webp(corpus: &[PathBuf]) {
+fn measure_decode_webp(corpus: &[PathBuf], rust_only: bool) {
     let mut image_webp_total_time = 0;
     let mut libwebp_total_time = 0;
     let mut total_pixels = 0;
@@ -318,15 +321,15 @@ fn measure_decode_webp(corpus: &[PathBuf]) {
                     let Ok(image) = image::load_from_memory(&bytes) else {
                         continue;
                     };
-                    let elapsed = start.elapsed();
+                    image_webp_total_time += start.elapsed().as_nanos();
 
-                    let start2 = std::time::Instant::now();
-                    let decoder = webp::Decoder::new(&bytes);
-                    black_box(decoder.decode().unwrap());
-                    let elapsed2 = start2.elapsed();
+                    if !rust_only {
+                        let start2 = std::time::Instant::now();
+                        let decoder = webp::Decoder::new(&bytes);
+                        black_box(decoder.decode().unwrap());
+                        libwebp_total_time += start2.elapsed().as_nanos();
+                    }
 
-                    image_webp_total_time += elapsed.as_nanos();
-                    libwebp_total_time += elapsed2.as_nanos();
                     total_pixels += image.width() as u64 * image.height() as u64;
                 }
                 _ => {
@@ -349,14 +352,14 @@ fn measure_decode_webp(corpus: &[PathBuf]) {
 
                     let start = std::time::Instant::now();
                     black_box(image::load_from_memory(&encoded).unwrap());
-                    let elapsed = start.elapsed();
+                    image_webp_total_time += start.elapsed().as_nanos();
 
-                    let start2 = std::time::Instant::now();
-                    black_box(webp::Decoder::new(&encoded).decode().unwrap());
-                    let elapsed2 = start2.elapsed();
+                    if !rust_only {
+                        let start2 = std::time::Instant::now();
+                        black_box(webp::Decoder::new(&encoded).decode().unwrap());
+                        libwebp_total_time += start2.elapsed().as_nanos();
+                    }
 
-                    image_webp_total_time += elapsed.as_nanos();
-                    libwebp_total_time += elapsed2.as_nanos();
                     total_pixels += image.width() as u64 * image.height() as u64;
                 }
             }
@@ -366,8 +369,11 @@ fn measure_decode_webp(corpus: &[PathBuf]) {
         (total_pixels as f64 / (1 << 20) as f64) / (image_webp_total_time as f64 * 1e-9);
     println!("image-rs WebP: {:>6.1} MP/s", bandwidth);
 
-    let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (libwebp_total_time as f64 * 1e-9);
-    println!("libwebp:       {:>6.1} MP/s", bandwidth);
+    if !rust_only {
+        let bandwidth =
+            (total_pixels as f64 / (1 << 20) as f64) / (libwebp_total_time as f64 * 1e-9);
+        println!("libwebp:       {:>6.1} MP/s", bandwidth);
+    }
 }
 
 fn measure_decode_qoi(corpus: &[PathBuf]) {

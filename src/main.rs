@@ -1,11 +1,14 @@
 #![allow(unused)]
 
 use std::{
+    fs,
     hint::black_box,
-    io::{Cursor, Write},
+    io::{Cursor, Read, Write},
     path::PathBuf,
+    time::Instant,
 };
 
+use byteorder_lite::{BigEndian, LittleEndian, ReadBytesExt};
 use clap::{arg, command, Parser, ValueEnum};
 use image::{DynamicImage, ImageFormat};
 use rand::prelude::*;
@@ -38,6 +41,10 @@ enum Mode {
     DecodeWebp,
     /// Measure the performance of decoding QOI images
     DecodeQoi,
+    /// Extract raw
+    ExtractRaw,
+    /// Compress raw
+    Deflate,
 }
 
 /// The corpus to choose from
@@ -46,12 +53,14 @@ enum Corpus {
     /// The QOI Benchmark corpus
     QoiBench,
     CwebpQoiBench,
+    Raw,
 }
 impl Corpus {
     fn get_corpus(&self) -> Vec<PathBuf> {
         let directory = match self {
             Corpus::QoiBench => "corpus/qoi_benchmark_suite",
             Corpus::CwebpQoiBench => "corpus/cwebp_qoi_bench",
+            Corpus::Raw => "corpus/raw",
         };
 
         let mut paths = Vec::new();
@@ -121,6 +130,8 @@ fn main() {
         Mode::DecodePng => measure_decode(&corpus, ImageFormat::Png, args.rust_only),
         Mode::DecodeWebp => measure_decode(&corpus, ImageFormat::WebP, args.rust_only),
         Mode::DecodeQoi => measure_decode(&corpus, ImageFormat::Qoi, args.rust_only),
+        Mode::ExtractRaw => extract_raw(&corpus),
+        Mode::Deflate => deflate(&corpus, args.rust_only),
     }
     innumerable::print_counts();
 }
@@ -338,6 +349,86 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
                 );
             }
             _ => {}
+        }
+    }
+}
+
+fn extract_raw(corpus: &[PathBuf]) {
+    fs::create_dir_all("corpus/raw").unwrap();
+
+    let mut i = 0;
+    for path in corpus {
+        if let Ok(mut bytes) = fs::read(path) {
+            let Ok(original_format) = image::guess_format(&bytes) else {
+                continue;
+            };
+
+            let mut image = image::load_from_memory(&bytes).unwrap();
+
+            let mut buffer = Cursor::new(Vec::new());
+            image.write_to(&mut buffer, ImageFormat::Png).unwrap();
+
+            buffer.set_position(33);
+            let idat_size = buffer.read_u32::<BigEndian>().unwrap();
+            let idat_type = buffer.read_u32::<BigEndian>().unwrap();
+
+            assert_eq!(idat_type, u32::from_be_bytes(*b"IDAT"));
+
+            let mut raw = vec![0; idat_size as usize];
+            buffer.read_exact(&mut raw).unwrap();
+
+            fs::write(format!("corpus/raw/{i:03}.raw"), raw).unwrap();
+            i += 1;
+        }
+    }
+}
+
+fn deflate(corpus: &[PathBuf], rust_only: bool) {
+    fs::create_dir_all("corpus/raw").unwrap();
+
+    let mut total_bytes = 0;
+    let mut fdeflate_bytes = 0;
+    let mut miniz_oxide_bytes = [0; 10];
+
+    let mut fdeflate_total_time = 0;
+    let mut miniz_oxide_total_time = [0; 10];
+
+    let mut i = 0;
+    for path in corpus {
+        if let Ok(mut bytes) = fs::read(path) {
+            let uncompressed = miniz_oxide::inflate::decompress_to_vec_zlib(&bytes).unwrap();
+
+            total_bytes += uncompressed.len();
+
+            let start = Instant::now();
+            fdeflate_bytes += fdeflate::compress_to_vec(&uncompressed).len();
+            fdeflate_total_time += start.elapsed().as_nanos();
+
+            if !rust_only {
+                for j in 0..=4 {
+                    let start = Instant::now();
+                    miniz_oxide_bytes[j] +=
+                        miniz_oxide::deflate::compress_to_vec(&uncompressed, j as u8).len();
+                    miniz_oxide_total_time[j] += start.elapsed().as_nanos();
+                }
+            }
+        }
+    }
+
+    let scale = (total_bytes as f64 / (1 << 30) as f64) / 1e-9;
+    println!(
+        "fdeflate:         {:>6.3} GiB/s    {:02.2}%",
+        scale / (fdeflate_total_time as f64),
+        100.0 * fdeflate_bytes as f64 / total_bytes as f64
+    );
+
+    if !rust_only {
+        for j in 0..=9 {
+            println!(
+                "miniz_oxide[{j}]:   {:>6.3} GiB/s    {:02.2}%",
+                scale / (miniz_oxide_total_time[j] as f64),
+                100.0 * miniz_oxide_bytes[j] as f64 / total_bytes as f64
+            );
         }
     }
 }

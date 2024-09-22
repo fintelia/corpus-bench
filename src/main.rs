@@ -4,6 +4,7 @@ use std::{
     fs,
     hint::black_box,
     io::{Cursor, Read, Write},
+    num::NonZeroU64,
     path::PathBuf,
     time::Instant,
 };
@@ -145,7 +146,9 @@ fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
     let mut uncompressed_bytes = 0;
     let mut total_pixels = 0;
 
+    let bar = indicatif::ProgressBar::new(corpus.len() as u64);
     for path in corpus {
+        bar.inc(1);
         if let Ok(image) = image::open(path) {
             if image.width() > 16383 || image.height() > 16383 {
                 continue;
@@ -169,6 +172,7 @@ fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
             total_pixels += image.width() as u64 * image.height() as u64;
         }
     }
+    bar.finish_and_clear();
 
     let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (total_time as f64 * 1e-9);
     let compression_ratio = total_bytes as f64 / uncompressed_bytes as f64;
@@ -254,7 +258,9 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
     let mut zune_qoi_total_time = 0;
     let mut total_pixels = 0;
 
+    let bar = indicatif::ProgressBar::new(corpus.len() as u64);
     for path in corpus {
+        bar.inc(1);
         if let Ok(mut bytes) = std::fs::read(path) {
             let Ok(original_format) = image::guess_format(&bytes) else {
                 continue;
@@ -322,6 +328,8 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
             }
         }
     }
+    bar.finish_and_clear();
+
     let scale = (total_pixels as f64 / (1 << 20) as f64) / 1e-9;
     println!(
         "image-rs:      {:>6.1} MP/s",
@@ -356,8 +364,10 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
 fn extract_raw(corpus: &[PathBuf]) {
     fs::create_dir_all("corpus/raw").unwrap();
 
+    let bar = indicatif::ProgressBar::new(corpus.len() as u64);
     let mut i = 0;
     for path in corpus {
+        bar.inc(1);
         if let Ok(mut bytes) = fs::read(path) {
             let Ok(original_format) = image::guess_format(&bytes) else {
                 continue;
@@ -381,6 +391,7 @@ fn extract_raw(corpus: &[PathBuf]) {
             i += 1;
         }
     }
+    bar.finish_and_clear();
 }
 
 fn deflate(corpus: &[PathBuf], rust_only: bool) {
@@ -388,32 +399,63 @@ fn deflate(corpus: &[PathBuf], rust_only: bool) {
 
     let mut total_bytes = 0;
     let mut fdeflate_bytes = 0;
+    let mut zopfli_bytes = 0;
     let mut miniz_oxide_bytes = [0; 10];
 
     let mut fdeflate_total_time = 0;
+    let mut zopfli_total_time = 0;
     let mut miniz_oxide_total_time = [0; 10];
 
-    let mut i = 0;
+    // let corpus = &corpus[..50];
+
+    let bar = indicatif::ProgressBar::new(corpus.len() as u64);
     for path in corpus {
         if let Ok(mut bytes) = fs::read(path) {
-            let uncompressed = miniz_oxide::inflate::decompress_to_vec_zlib(&bytes).unwrap();
+            let uncompressed = fdeflate::decompress_to_vec(&bytes).unwrap();
 
             total_bytes += uncompressed.len();
 
             let start = Instant::now();
-            fdeflate_bytes += fdeflate::compress_to_vec(&uncompressed).len();
+            let fdeflate_output = fdeflate::compress_to_vec(&uncompressed);
+            fdeflate_bytes += fdeflate_output.len(); //fdeflate::compress_to_vec(&uncompressed).len();
             fdeflate_total_time += start.elapsed().as_nanos();
 
+            // assert_eq!(
+            //     fdeflate::decompress_to_vec(&fdeflate_output).unwrap(),
+            //     uncompressed
+            // );
+
             if !rust_only {
-                for j in 0..=4 {
+                // let start = Instant::now();
+                // let mut zopfli_compressed = Vec::new();
+                // zopfli::compress(
+                //     zopfli::Options {
+                //         iteration_count: NonZeroU64::new(5).unwrap(),
+                //         ..Default::default()
+                //     },
+                //     zopfli::Format::Zlib,
+                //     &*uncompressed,
+                //     &mut zopfli_compressed,
+                // )
+                // .unwrap();
+                // zopfli_bytes += zopfli_compressed.len();
+                // zopfli_total_time += start.elapsed().as_nanos();
+
+                for j in 0..=0 {
                     let start = Instant::now();
-                    miniz_oxide_bytes[j] +=
-                        miniz_oxide::deflate::compress_to_vec(&uncompressed, j as u8).len();
+                    let mut encoder = flate2::write::ZlibEncoder::new(
+                        Vec::new(),
+                        flate2::Compression::new(j as u32),
+                    );
+                    encoder.write_all(&uncompressed).unwrap();
+                    miniz_oxide_bytes[j] += encoder.flush_finish().unwrap().len();
                     miniz_oxide_total_time[j] += start.elapsed().as_nanos();
                 }
             }
         }
+        bar.inc(1);
     }
+    bar.finish_and_clear();
 
     let scale = (total_bytes as f64 / (1 << 30) as f64) / 1e-9;
     println!(
@@ -423,6 +465,11 @@ fn deflate(corpus: &[PathBuf], rust_only: bool) {
     );
 
     if !rust_only {
+        println!(
+            "zopfli:           {:>6.5} GiB/s    {:02.2}%",
+            scale / (zopfli_total_time as f64),
+            100.0 * zopfli_bytes as f64 / total_bytes as f64
+        );
         for j in 0..=9 {
             println!(
                 "miniz_oxide[{j}]:   {:>6.3} GiB/s    {:02.2}%",

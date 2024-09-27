@@ -304,10 +304,12 @@ dependencies = [
  "innumerable",
  "miniz_oxide 0.8.0",
  "mtpng",
+ "png",
  "rand",
  "walkdir",
  "webp",
  "zopfli",
+ "zune-inflate",
  "zune-png",
  "zune-qoi",
 ]
@@ -722,6 +724,8 @@ dependencies = [
 [[package]]
 name = "miniz_oxide"
 version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2d80299ef12ff69b16a84bb182e3b9df68b5a91574d3d4fa6e41b65deec4df1"
 dependencies = [
  "adler2",
 ]

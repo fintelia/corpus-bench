@@ -124,34 +124,6 @@ fn main() {
             let corpus = c.corpus.get_corpus();
             println!("Running encoding benchmark with corpus: {:?}", c.corpus);
 
-            let (bandwidth, compression_ratio) = zune_qoi_encode(&corpus);
-            println!(
-                "zune-qoi:      {:>6.1} MP/s  {:02.2}%",
-                bandwidth,
-                compression_ratio * 100.0
-            );
-
-            let (bandwidth, compression_ratio) = zune_png_encode(&corpus);
-            println!(
-                "zune-png:      {:>6.1} MP/s  {:02.2}%",
-                bandwidth,
-                compression_ratio * 100.0
-            );
-
-            let (bandwidth, compression_ratio) = mtpng_encode(&corpus);
-            println!(
-                "mtpng:         {:>6.1} MP/s  {:02.2}%",
-                bandwidth,
-                compression_ratio * 100.0
-            );
-
-            let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::Qoi);
-            println!(
-                "image-rs QOI:  {:>6.1} MP/s  {:02.2}%",
-                bandwidth,
-                compression_ratio * 100.0
-            );
-
             let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::Png);
             println!(
                 "image-rs PNG:  {:>6.1} MP/s  {:02.2}%",
@@ -165,6 +137,36 @@ fn main() {
                 bandwidth,
                 compression_ratio * 100.0
             );
+
+            if !args.rust_only {
+                let (bandwidth, compression_ratio) = zune_qoi_encode(&corpus);
+                println!(
+                    "zune-qoi:      {:>6.1} MP/s  {:02.2}%",
+                    bandwidth,
+                    compression_ratio * 100.0
+                );
+
+                let (bandwidth, compression_ratio) = zune_png_encode(&corpus);
+                println!(
+                    "zune-png:      {:>6.1} MP/s  {:02.2}%",
+                    bandwidth,
+                    compression_ratio * 100.0
+                );
+
+                let (bandwidth, compression_ratio) = mtpng_encode(&corpus);
+                println!(
+                    "mtpng:         {:>6.1} MP/s  {:02.2}%",
+                    bandwidth,
+                    compression_ratio * 100.0
+                );
+
+                let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::Qoi);
+                println!(
+                    "image-rs QOI:  {:>6.1} MP/s  {:02.2}%",
+                    bandwidth,
+                    compression_ratio * 100.0
+                );
+            }
         }
         Mode::DecodePng(c) => {
             measure_decode(&c.corpus.get_corpus(), ImageFormat::Png, args.rust_only)
@@ -413,7 +415,7 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
 }
 
 fn measure_png_decode(corpus: &[PathBuf], rust_only: bool, speed: Speed, filter: Filter) {
-    let mut total_bytes = Vec::new();
+    let mut total_pixels = Vec::new();
     let mut fdeflate_total_time = Vec::new();
     let mut zune_png_total_time = Vec::new();
     let mut qoi_total_time = Vec::new();
@@ -460,7 +462,7 @@ fn measure_png_decode(corpus: &[PathBuf], rust_only: bool, speed: Speed, filter:
             encoder.write_image_data(image.as_bytes()).unwrap();
             encoder.finish().unwrap();
 
-            total_bytes.push(image.as_bytes().len());
+            total_pixels.push(image.width() as usize * image.height() as usize);
 
             let start = Instant::now();
             image::load_from_memory(&reencoded).unwrap();
@@ -496,15 +498,19 @@ fn measure_png_decode(corpus: &[PathBuf], rust_only: bool, speed: Speed, filter:
 
         let speeds: Vec<_> = time
             .iter()
-            .zip(total_bytes.iter())
+            .zip(total_pixels.iter())
             .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
             .collect();
-        println!("{name: <18}{:>6.1} MiB/s", geometric_mean(&speeds),);
+        println!(
+            "{name: <18}{:>6.1} MP/s (average) {:>6.1} MP/s (geomean)",
+            mean(&speeds),
+            geometric_mean(&speeds),
+        );
     };
 
-    print_entry("image-png:", &total_bytes, &fdeflate_total_time);
-    print_entry("zune-png:", &total_bytes, &zune_png_total_time);
-    print_entry("qoi:", &total_bytes, &qoi_total_time);
+    print_entry("image-png:", &total_pixels, &fdeflate_total_time);
+    print_entry("zune-png:", &total_pixels, &zune_png_total_time);
+    print_entry("qoi:", &total_pixels, &qoi_total_time);
 }
 
 fn extract_raw() {

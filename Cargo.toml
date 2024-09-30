@@ -13,7 +13,7 @@ indicatif = "0.17.8"
 innumerable = "0.1.0"
 miniz_oxide = "0.8.0"
 mtpng = "0.3.5"
-png = { version = "0.17.13", features = ["unstable"] }
+png = { version = "0.17.13", features = [] }
 rand = "0.8.5"
 walkdir = "2.5.0"
 webp = "0.3.0"
@@ -29,5 +29,6 @@ debug = true
 [patch.crates-io]
 #image-webp = { path = "../image-webp" }
 #image = { path = "../image" }
-fdeflate = { path = "../fdeflate" }
+#fdeflate = { path = "../fdeflate" }
 # miniz_oxide = { path = "../miniz_oxide/miniz_oxide" }
+# png = { path = "../image-png" }

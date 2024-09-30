@@ -27,8 +27,8 @@ debug = true
 # opt-level = 1
 
 [patch.crates-io]
-#image-webp = { path = "../image-webp" }
-#image = { path = "../image" }
-#fdeflate = { path = "../fdeflate" }
+# image-webp = { path = "../image-webp" }
+# image = { path = "../image" }
+# fdeflate = { path = "../fdeflate" }
 # miniz_oxide = { path = "../miniz_oxide/miniz_oxide" }
 # png = { path = "../image-png" }

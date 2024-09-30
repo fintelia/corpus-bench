@@ -24,8 +24,9 @@ struct Args {
     #[clap(subcommand)]
     mode: Mode,
 
+    /// Only benchmark image-rs libraries.
     #[arg(long, global = true)]
-    rust_only: bool,
+    image_rs_only: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -138,7 +139,7 @@ fn main() {
                 compression_ratio * 100.0
             );
 
-            if !args.rust_only {
+            if !args.image_rs_only {
                 let (bandwidth, compression_ratio) = zune_qoi_encode(&corpus);
                 println!(
                     "zune-qoi:      {:>6.1} MP/s  {:02.2}%",
@@ -169,23 +170,23 @@ fn main() {
             }
         }
         Mode::DecodePng(c) => {
-            measure_decode(&c.corpus.get_corpus(), ImageFormat::Png, args.rust_only)
+            measure_decode(&c.corpus.get_corpus(), ImageFormat::Png, args.image_rs_only)
         }
         Mode::DecodeWebp(c) => {
-            measure_decode(&c.corpus.get_corpus(), ImageFormat::WebP, args.rust_only)
+            measure_decode(&c.corpus.get_corpus(), ImageFormat::WebP, args.image_rs_only)
         }
         Mode::DecodeQoi(c) => {
-            measure_decode(&c.corpus.get_corpus(), ImageFormat::Qoi, args.rust_only)
+            measure_decode(&c.corpus.get_corpus(), ImageFormat::Qoi, args.image_rs_only)
         }
         Mode::DecodePngSettings {
             corpus,
             speed,
             filter,
-        } => measure_png_decode(&corpus.get_corpus(), args.rust_only, speed, filter),
+        } => measure_png_decode(&corpus.get_corpus(), args.image_rs_only, speed, filter),
         Mode::ExtractRaw => extract_raw(),
         Mode::GenerateCompressed => generate_compressed(),
-        Mode::Deflate => deflate(args.rust_only),
-        Mode::Inflate => inflate(args.rust_only),
+        Mode::Deflate => deflate(args.image_rs_only),
+        Mode::Inflate => inflate(args.image_rs_only),
     }
     innumerable::print_counts();
 }

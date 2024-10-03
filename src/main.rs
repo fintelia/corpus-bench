@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use std::{
+    ffi::{c_int, c_void},
     fs,
     hint::black_box,
     io::{Cursor, Read, Write},
@@ -12,6 +13,7 @@ use std::{
 use byteorder_lite::{BigEndian, LittleEndian, ReadBytesExt};
 use clap::{arg, command, Parser, ValueEnum};
 use image::{DynamicImage, ImageFormat};
+use libc::abs;
 use rand::prelude::*;
 use walkdir::WalkDir;
 
@@ -172,9 +174,11 @@ fn main() {
         Mode::DecodePng(c) => {
             measure_decode(&c.corpus.get_corpus(), ImageFormat::Png, args.image_rs_only)
         }
-        Mode::DecodeWebp(c) => {
-            measure_decode(&c.corpus.get_corpus(), ImageFormat::WebP, args.image_rs_only)
-        }
+        Mode::DecodeWebp(c) => measure_decode(
+            &c.corpus.get_corpus(),
+            ImageFormat::WebP,
+            args.image_rs_only,
+        ),
         Mode::DecodeQoi(c) => {
             measure_decode(&c.corpus.get_corpus(), ImageFormat::Qoi, args.image_rs_only)
         }
@@ -189,6 +193,24 @@ fn main() {
         Mode::Inflate => inflate(args.image_rs_only),
     }
     innumerable::print_counts();
+}
+
+extern "C" {
+    fn libpng_decode(
+        data: *const u8,
+        data_len: c_int,
+        width: *mut c_int,
+        height: *mut c_int,
+    ) -> *mut c_void;
+
+    fn stbi_load_from_memory(
+        data: *const u8,
+        data_len: c_int,
+        width: *mut c_int,
+        height: *mut c_int,
+        channels: *mut c_int,
+        desired_channels: c_int,
+    ) -> *mut u8;
 }
 
 fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
@@ -306,11 +328,13 @@ fn zune_qoi_encode(corpus: &[PathBuf]) -> (f64, f64) {
 }
 
 fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
-    let mut image_total_time = 0;
-    let mut libwebp_total_time = 0;
-    let mut zune_png_total_time = 0;
-    let mut zune_qoi_total_time = 0;
-    let mut total_pixels = 0;
+    let mut image_total_time = Vec::new();
+    let mut libwebp_total_time = Vec::new();
+    let mut libpng_total_time = Vec::new();
+    let mut stbi_total_time = Vec::new();
+    let mut zune_png_total_time = Vec::new();
+    let mut zune_qoi_total_time = Vec::new();
+    let mut total_pixels = Vec::new();
 
     let bar = indicatif::ProgressBar::new(corpus.len() as u64);
     for path in corpus {
@@ -341,30 +365,66 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
             }
 
             let start = std::time::Instant::now();
-            let Ok(image) = image::load_from_memory(&bytes) else {
-                continue;
-            };
-            image_total_time += start.elapsed().as_nanos();
-            total_pixels += image.width() as u64 * image.height() as u64;
+            let image = image::load_from_memory(&bytes).unwrap();
+            // if image.width() * image.height() > 5000 {
+            //     continue;
+            // }
+            image_total_time.push(start.elapsed().as_nanos());
+            total_pixels.push(image.width() as u64 * image.height() as u64);
 
             if !rust_only {
                 match format {
                     ImageFormat::Png => {
-                        let start2 = std::time::Instant::now();
-                        let mut decoder = zune_png::PngDecoder::new(Cursor::new(bytes));
+                        let start = std::time::Instant::now();
+                        let mut decoder = zune_png::PngDecoder::new(Cursor::new(&bytes));
                         decoder.set_options(
                             zune_png::zune_core::options::DecoderOptions::new_fast()
                                 .set_max_width(usize::MAX)
                                 .set_max_height(usize::MAX),
                         );
                         black_box(decoder.decode().unwrap());
-                        zune_png_total_time += start2.elapsed().as_nanos();
+                        zune_png_total_time.push(start.elapsed().as_nanos());
+
+                        let start = std::time::Instant::now();
+                        let mut width = 0;
+                        let mut height = 0;
+                        unsafe {
+                            let decoded = libpng_decode(
+                                bytes.as_ptr(),
+                                bytes.len() as c_int,
+                                &mut width as *mut _,
+                                &mut height as *mut _,
+                            );
+                            libpng_total_time.push(start.elapsed().as_nanos());
+                            assert_eq!(width, image.width() as i32);
+                            assert_eq!(height, image.height() as i32);
+                            libc::free(decoded);
+                        }
+
+                        let start = std::time::Instant::now();
+                        let mut width = 0;
+                        let mut height = 0;
+                        let mut channels = 0;
+                        unsafe {
+                            let decoded = stbi_load_from_memory(
+                                bytes.as_ptr(),
+                                bytes.len() as c_int,
+                                &mut width as *mut _,
+                                &mut height as *mut _,
+                                &mut channels as *mut _,
+                                0,
+                            );
+                            stbi_total_time.push(start.elapsed().as_nanos());
+                            assert_eq!(width, image.width() as i32);
+                            assert_eq!(height, image.height() as i32);
+                            libc::free(decoded as *mut c_void);
+                        };
                     }
                     ImageFormat::WebP => {
                         let start2 = std::time::Instant::now();
                         let decoder = webp::Decoder::new(&bytes);
                         black_box(decoder.decode().unwrap());
-                        libwebp_total_time += start2.elapsed().as_nanos();
+                        libwebp_total_time.push(start2.elapsed().as_nanos());
                     }
                     ImageFormat::Qoi => {
                         let start2 = std::time::Instant::now();
@@ -375,7 +435,7 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
                                 .set_max_height(usize::MAX),
                         );
                         black_box(decoder.decode().unwrap());
-                        zune_qoi_total_time += start2.elapsed().as_nanos();
+                        zune_qoi_total_time.push(start2.elapsed().as_nanos());
                     }
                     _ => {}
                 }
@@ -384,35 +444,29 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
     }
     bar.finish_and_clear();
 
-    let scale = (total_pixels as f64 / (1 << 20) as f64) / 1e-9;
-    println!(
-        "image-rs:      {:>6.1} MP/s",
-        scale / (image_total_time as f64)
-    );
-
-    if !rust_only {
-        match format {
-            ImageFormat::Png => {
-                println!(
-                    "zune-png:      {:>6.1} MP/s",
-                    scale / (zune_png_total_time as f64)
-                );
-            }
-            ImageFormat::WebP => {
-                println!(
-                    "libwebp:       {:>6.1} MP/s",
-                    scale / (libwebp_total_time as f64)
-                );
-            }
-            ImageFormat::Qoi => {
-                println!(
-                    "zune-qoi:      {:>6.1} MP/s",
-                    scale / (zune_qoi_total_time as f64)
-                );
-            }
-            _ => {}
+    let print_entry = |name: &str, time: &[u128]| {
+        if time.is_empty() {
+            return;
         }
-    }
+
+        let speeds: Vec<_> = time
+            .iter()
+            .zip(total_pixels.iter())
+            .map(|(&x, &y)| (y as f64 / 1000_000f64) / (x as f64 * 1e-9))
+            .collect();
+        println!(
+            "{name: <18}{:>6.1} MP/s (average) {:>6.1} MP/s (geomean)",
+            mean(&speeds),
+            geometric_mean(&speeds),
+        );
+    };
+
+    print_entry("image-rs:", &image_total_time);
+    print_entry("zune-png:", &zune_png_total_time);
+    print_entry("stb_image:", &stbi_total_time);
+    print_entry("libpng:", &libpng_total_time);
+    print_entry("libwebp:", &libwebp_total_time);
+    print_entry("zune-qoi:", &zune_qoi_total_time);
 }
 
 fn measure_png_decode(corpus: &[PathBuf], rust_only: bool, speed: Speed, filter: Filter) {

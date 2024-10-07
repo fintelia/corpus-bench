@@ -29,7 +29,7 @@ debug = true
 
 [patch.crates-io]
 # image-webp = { path = "../image-webp" }
-image = { path = "../image" }
+# image = { path = "../image" }
 # fdeflate = { path = "../fdeflate" }
 # miniz_oxide = { path = "../miniz_oxide/miniz_oxide" }
 # png = { path = "../image-png" }

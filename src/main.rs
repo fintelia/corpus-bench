@@ -73,6 +73,11 @@ enum Mode {
     /// Measure the performance of decoding
     Decode(DecodeSettings),
 
+    DecodeSingle {
+        /// The path to the file to decode
+        path: PathBuf,
+    },
+
     /// Extract raw
     ExtractRaw,
     GenerateCompressed,
@@ -184,6 +189,22 @@ fn main() {
             );
 
             measure_decode(&corpus, args.image_rs_only, decode_settings);
+        }
+        Mode::DecodeSingle { path } => {
+            println!(
+                "Running decoding benchmark with single file: {}",
+                path.display()
+            );
+            measure_decode(
+                &[path],
+                args.image_rs_only,
+                DecodeSettings {
+                    corpus: Corpus::QoiBench,
+                    reencode: false,
+                    png_speed: Speed::Fast,
+                    png_filter: Filter::Adaptive,
+                },
+            );
         }
         Mode::ExtractRaw => extract_raw(),
         Mode::GenerateCompressed => generate_compressed(),
@@ -618,15 +639,17 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
     if image_total_time.contains_key(&ImageFormat::Png) {
         print_entry("image-rs PNG:", &image_total_time[&ImageFormat::Png]);
     }
+    print_entry("zune-png:", &zune_png_total_time);
     if wuffs_total_time.contains_key(&ImageFormat::Png) {
         print_entry("wuffs PNG:", &wuffs_total_time[&ImageFormat::Png]);
     }
-    print_entry("stb_image PNG:", &stbi_total_time);
-    print_entry("zune-png:", &zune_png_total_time);
     print_entry("libpng:", &libpng_total_time);
+    print_entry("stb_image PNG:", &stbi_total_time);
 
     // WebP results
-    if reencode && ! rust_only { println!(); }
+    if reencode && !rust_only {
+        println!();
+    }
     if image_total_time.contains_key(&ImageFormat::WebP) {
         print_entry("image-rs WebP:", &image_total_time[&ImageFormat::WebP]);
     }
@@ -636,7 +659,9 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
     print_entry("libwebp:", &libwebp_total_time);
 
     // QOI results
-    if reencode && ! rust_only { println!(); }
+    if reencode && !rust_only {
+        println!();
+    }
     if image_total_time.contains_key(&ImageFormat::Qoi) {
         print_entry("image-rs QOI:", &image_total_time[&ImageFormat::Qoi]);
     }

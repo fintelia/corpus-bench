@@ -1,8 +1,10 @@
 #![allow(unused)]
 
 use std::{
+    collections::HashMap,
     ffi::{c_int, c_void},
     fs,
+    hash::Hash,
     hint::black_box,
     io::{Cursor, Read, Write},
     num::NonZeroU64,
@@ -12,8 +14,8 @@ use std::{
 
 use byteorder_lite::{BigEndian, LittleEndian, ReadBytesExt};
 use clap::{arg, command, Parser, ValueEnum};
-use image::{DynamicImage, ImageFormat};
-use libc::abs;
+use image::{ColorType, DynamicImage, ImageFormat};
+use libc::{abs, c_char};
 use rand::prelude::*;
 use walkdir::WalkDir;
 
@@ -48,26 +50,29 @@ enum Filter {
     Adaptive,
 }
 
+#[derive(clap::Args, Clone, Debug)]
+struct DecodeSettings {
+    #[arg(value_enum)]
+    corpus: Corpus,
+
+    #[clap(long, default_value = "false")]
+    reencode: bool,
+
+    #[clap(short, long, value_enum, default_value_t = Speed::Fast)]
+    png_speed: Speed,
+    #[clap(short, long, value_enum, default_value_t = Filter::Adaptive)]
+    png_filter: Filter,
+}
+
 /// The mode to run the benchmark in
 #[derive(clap::Subcommand, Clone, Debug)]
 enum Mode {
     /// Measure the performance of encoding
     Encode(CorpusSelection),
-    /// Measure the performance of decoding PNGs
-    DecodePng(CorpusSelection),
-    /// Measure the performance of decoding WebP images
-    DecodeWebp(CorpusSelection),
-    /// Measure the performance of decoding QOI images
-    DecodeQoi(CorpusSelection),
-    DecodePngSettings {
-        #[arg(value_enum)]
-        corpus: Corpus,
 
-        #[clap(short, long, value_enum, default_value_t = Speed::Fast)]
-        speed: Speed,
-        #[clap(short, long, value_enum, default_value_t = Filter::Adaptive)]
-        filter: Filter,
-    },
+    /// Measure the performance of decoding
+    Decode(DecodeSettings),
+
     /// Extract raw
     ExtractRaw,
     GenerateCompressed,
@@ -171,22 +176,15 @@ fn main() {
                 );
             }
         }
-        Mode::DecodePng(c) => {
-            measure_decode(&c.corpus.get_corpus(), ImageFormat::Png, args.image_rs_only)
+        Mode::Decode(decode_settings) => {
+            let corpus = decode_settings.corpus.get_corpus();
+            println!(
+                "Running decoding benchmark with corpus: {:?}",
+                decode_settings.corpus
+            );
+
+            measure_decode(&corpus, args.image_rs_only, decode_settings);
         }
-        Mode::DecodeWebp(c) => measure_decode(
-            &c.corpus.get_corpus(),
-            ImageFormat::WebP,
-            args.image_rs_only,
-        ),
-        Mode::DecodeQoi(c) => {
-            measure_decode(&c.corpus.get_corpus(), ImageFormat::Qoi, args.image_rs_only)
-        }
-        Mode::DecodePngSettings {
-            corpus,
-            speed,
-            filter,
-        } => measure_png_decode(&corpus.get_corpus(), args.image_rs_only, speed, filter),
         Mode::ExtractRaw => extract_raw(),
         Mode::GenerateCompressed => generate_compressed(),
         Mode::Deflate => deflate(args.image_rs_only),
@@ -204,6 +202,15 @@ extern "C" {
     ) -> *mut c_void;
 
     fn stbi_load_from_memory(
+        data: *const u8,
+        data_len: c_int,
+        width: *mut c_int,
+        height: *mut c_int,
+        channels: *mut c_int,
+        desired_channels: c_int,
+    ) -> *mut u8;
+
+    fn wuffs_load_from_memory(
         data: *const u8,
         data_len: c_int,
         width: *mut c_int,
@@ -327,8 +334,9 @@ fn zune_qoi_encode(corpus: &[PathBuf]) -> (f64, f64) {
     })
 }
 
-fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
-    let mut image_total_time = Vec::new();
+fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSettings) {
+    let mut image_total_time: HashMap<ImageFormat, Vec<u128>> = HashMap::new();
+    let mut wuffs_total_time: HashMap<ImageFormat, Vec<u128>> = HashMap::new();
     let mut libwebp_total_time = Vec::new();
     let mut libpng_total_time = Vec::new();
     let mut stbi_total_time = Vec::new();
@@ -336,109 +344,253 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
     let mut zune_qoi_total_time = Vec::new();
     let mut total_pixels = Vec::new();
 
+    let reencode = decode_settings.reencode;
+
     let bar = indicatif::ProgressBar::new(corpus.len() as u64);
     for path in corpus {
         bar.inc(1);
-        if let Ok(mut bytes) = std::fs::read(path) {
-            let Ok(original_format) = image::guess_format(&bytes) else {
-                continue;
-            };
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
+        let Ok(original_format) = image::guess_format(&bytes) else {
+            continue;
+        };
 
-            if original_format != format {
-                let Ok(image) = image::load_from_memory(&bytes) else {
-                    continue;
-                };
-                if format == ImageFormat::WebP && (image.width() > 16383 || image.height() > 16383)
-                {
-                    continue;
-                }
-                let image: DynamicImage = if image.color().has_alpha() {
-                    image.to_rgba8().into()
-                } else {
-                    image.to_rgb8().into()
-                };
-                let mut encoded = Vec::new();
-                image
-                    .write_to(&mut Cursor::new(&mut encoded), format)
-                    .unwrap();
-                bytes = encoded;
+        let start = std::time::Instant::now();
+        let Ok(image) = image::load_from_memory(&bytes) else {
+            continue;
+        };
+        if !reencode {
+            image_total_time
+                .entry(original_format)
+                .or_default()
+                .push(start.elapsed().as_nanos());
+        }
+        total_pixels.push(image.width() as u64 * image.height() as u64);
+
+        // PNG
+        let mut reencoded_png = Vec::new();
+        let png_bytes = if reencode && original_format != ImageFormat::Png {
+            let mut image = image.clone();
+            let mut encoder = png::Encoder::new(&mut reencoded_png, image.width(), image.height());
+            if image.color().has_alpha() {
+                image = DynamicImage::ImageRgba8(image.to_rgba8());
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+            } else {
+                image = DynamicImage::ImageRgb8(image.to_rgb8());
+                encoder.set_color(png::ColorType::Rgb);
+                encoder.set_depth(png::BitDepth::Eight);
             }
 
-            let start = std::time::Instant::now();
-            let image = image::load_from_memory(&bytes).unwrap();
-            // if image.width() * image.height() > 5000 {
-            //     continue;
-            // }
-            image_total_time.push(start.elapsed().as_nanos());
-            total_pixels.push(image.width() as u64 * image.height() as u64);
+            encoder.set_compression(match decode_settings.png_speed {
+                Speed::Fast => png::Compression::Fast,
+                Speed::Default => png::Compression::Default,
+                Speed::Best => png::Compression::Best,
+            });
+            encoder.set_filter(match decode_settings.png_filter {
+                Filter::None => png::FilterType::NoFilter,
+                Filter::Sub => png::FilterType::Sub,
+                Filter::Up => png::FilterType::Up,
+                Filter::Average => png::FilterType::Avg,
+                Filter::Paeth => png::FilterType::Paeth,
+                Filter::Adaptive => png::FilterType::Paeth,
+            });
+            encoder.set_adaptive_filter(match decode_settings.png_filter {
+                Filter::Adaptive => png::AdaptiveFilterType::Adaptive,
+                _ => png::AdaptiveFilterType::NonAdaptive,
+            });
 
-            if !rust_only {
-                match format {
-                    ImageFormat::Png => {
-                        let start = std::time::Instant::now();
-                        let mut decoder = zune_png::PngDecoder::new(Cursor::new(&bytes));
-                        decoder.set_options(
-                            zune_png::zune_core::options::DecoderOptions::new_fast()
-                                .set_max_width(usize::MAX)
-                                .set_max_height(usize::MAX),
-                        );
-                        black_box(decoder.decode().unwrap());
-                        zune_png_total_time.push(start.elapsed().as_nanos());
+            let mut encoder = encoder.write_header().unwrap();
+            encoder.write_image_data(image.as_bytes()).unwrap();
+            encoder.finish().unwrap();
+            Some(&*reencoded_png)
+        } else if original_format == ImageFormat::Png {
+            Some(&*bytes)
+        } else {
+            None
+        };
+        if !rust_only {
+            if let Some(png_bytes) = png_bytes {
+                let start = std::time::Instant::now();
+                let mut decoder = zune_png::PngDecoder::new(Cursor::new(&bytes));
+                decoder.set_options(
+                    zune_png::zune_core::options::DecoderOptions::new_fast()
+                        .set_max_width(usize::MAX)
+                        .set_max_height(usize::MAX),
+                );
+                black_box(decoder.decode().unwrap());
+                zune_png_total_time.push(start.elapsed().as_nanos());
 
-                        let start = std::time::Instant::now();
-                        let mut width = 0;
-                        let mut height = 0;
-                        unsafe {
-                            let decoded = libpng_decode(
-                                bytes.as_ptr(),
-                                bytes.len() as c_int,
-                                &mut width as *mut _,
-                                &mut height as *mut _,
-                            );
-                            libpng_total_time.push(start.elapsed().as_nanos());
-                            assert_eq!(width, image.width() as i32);
-                            assert_eq!(height, image.height() as i32);
-                            libc::free(decoded);
-                        }
-
-                        let start = std::time::Instant::now();
-                        let mut width = 0;
-                        let mut height = 0;
-                        let mut channels = 0;
-                        unsafe {
-                            let decoded = stbi_load_from_memory(
-                                bytes.as_ptr(),
-                                bytes.len() as c_int,
-                                &mut width as *mut _,
-                                &mut height as *mut _,
-                                &mut channels as *mut _,
-                                0,
-                            );
-                            stbi_total_time.push(start.elapsed().as_nanos());
-                            assert_eq!(width, image.width() as i32);
-                            assert_eq!(height, image.height() as i32);
-                            libc::free(decoded as *mut c_void);
-                        };
-                    }
-                    ImageFormat::WebP => {
-                        let start2 = std::time::Instant::now();
-                        let decoder = webp::Decoder::new(&bytes);
-                        black_box(decoder.decode().unwrap());
-                        libwebp_total_time.push(start2.elapsed().as_nanos());
-                    }
-                    ImageFormat::Qoi => {
-                        let start2 = std::time::Instant::now();
-                        let mut decoder = zune_qoi::QoiDecoder::new_with_options(
-                            bytes,
-                            zune_qoi::zune_core::options::DecoderOptions::new_fast()
-                                .set_max_width(usize::MAX)
-                                .set_max_height(usize::MAX),
-                        );
-                        black_box(decoder.decode().unwrap());
-                        zune_qoi_total_time.push(start2.elapsed().as_nanos());
-                    }
-                    _ => {}
+                let start = std::time::Instant::now();
+                let mut width = 0;
+                let mut height = 0;
+                unsafe {
+                    let decoded = libpng_decode(
+                        bytes.as_ptr(),
+                        bytes.len() as c_int,
+                        &mut width as *mut _,
+                        &mut height as *mut _,
+                    );
+                    libpng_total_time.push(start.elapsed().as_nanos());
+                    assert_eq!(width, image.width() as i32);
+                    assert_eq!(height, image.height() as i32);
+                    libc::free(decoded);
                 }
+
+                let start = std::time::Instant::now();
+                let mut width = 0;
+                let mut height = 0;
+                let mut channels = 0;
+                unsafe {
+                    let decoded = stbi_load_from_memory(
+                        bytes.as_ptr(),
+                        bytes.len() as c_int,
+                        &mut width as *mut _,
+                        &mut height as *mut _,
+                        &mut channels as *mut _,
+                        0,
+                    );
+                    stbi_total_time.push(start.elapsed().as_nanos());
+                    assert_eq!(width, image.width() as i32);
+                    assert_eq!(height, image.height() as i32);
+                    libc::free(decoded as *mut c_void);
+                };
+            }
+        }
+
+        // WEBP
+        let mut reencoded_webp = Vec::new();
+        let webp_bytes = if reencode
+            && original_format != ImageFormat::WebP
+            && image.width() < 16384
+            && image.height() < 16384
+        {
+            let mut image = image.clone();
+            match image.color() {
+                ColorType::L16 => image = DynamicImage::ImageLuma8(image.to_luma8()),
+                ColorType::La16 => image = DynamicImage::ImageLumaA8(image.to_luma_alpha8()),
+                ColorType::Rgb16 => image = DynamicImage::ImageRgb8(image.to_rgb8()),
+                ColorType::Rgba16 => image = DynamicImage::ImageRgba8(image.to_rgba8()),
+                _ => {}
+            }
+            image
+                .write_to(&mut Cursor::new(&mut reencoded_webp), ImageFormat::WebP)
+                .unwrap();
+            Some(&*reencoded_webp)
+        } else if original_format == ImageFormat::WebP {
+            Some(&*bytes)
+        } else {
+            None
+        };
+        if !rust_only {
+            if let Some(webp_bytes) = webp_bytes {
+                let start = std::time::Instant::now();
+                let decoder = webp::Decoder::new(&webp_bytes);
+                black_box(decoder.decode().unwrap());
+                libwebp_total_time.push(start.elapsed().as_nanos());
+            }
+        }
+
+        // QOI
+        let mut reencoded_qoi = Vec::new();
+        let qoi_bytes = if reencode && original_format != ImageFormat::Qoi {
+            let mut image = image.clone();
+            if image.color().has_alpha() {
+                image = DynamicImage::ImageRgba8(image.to_rgba8());
+            } else {
+                image = DynamicImage::ImageRgb8(image.to_rgb8());
+            }
+            image
+                .write_to(&mut Cursor::new(&mut reencoded_qoi), ImageFormat::Qoi)
+                .unwrap();
+            Some(&*reencoded_qoi)
+        } else if original_format == ImageFormat::Qoi {
+            Some(&*bytes)
+        } else {
+            None
+        };
+        if !rust_only {
+            if let Some(qoi_bytes) = qoi_bytes {
+                let start = std::time::Instant::now();
+                let mut decoder = zune_qoi::QoiDecoder::new_with_options(
+                    qoi_bytes,
+                    zune_qoi::zune_core::options::DecoderOptions::new_fast()
+                        .set_max_width(usize::MAX)
+                        .set_max_height(usize::MAX),
+                );
+                black_box(decoder.decode().unwrap());
+                zune_qoi_total_time.push(start.elapsed().as_nanos());
+            }
+        }
+
+        // Collect wuffs times
+        if !rust_only {
+            for (format, bytes) in [
+                (ImageFormat::Png, png_bytes),
+                (ImageFormat::WebP, webp_bytes),
+                (ImageFormat::Qoi, qoi_bytes),
+            ] {
+                let Some(bytes) = bytes else {
+                    continue;
+                };
+
+                let start = std::time::Instant::now();
+                let mut width = 0;
+                let mut height = 0;
+                let mut channels = 0;
+                let desired_channels = match image.color() {
+                    ColorType::L8 | ColorType::L16 => 1,
+                    ColorType::La8 | ColorType::La16 => 2,
+                    ColorType::Rgb8 | ColorType::Rgb16 => 3,
+                    ColorType::Rgba8 | ColorType::Rgba16 => 4,
+                    _ => 0,
+                };
+                unsafe {
+                    let decoded = wuffs_load_from_memory(
+                        bytes.as_ptr(),
+                        bytes.len() as c_int,
+                        &mut width as *mut _,
+                        &mut height as *mut _,
+                        &mut channels as *mut _,
+                        desired_channels,
+                    );
+                    if decoded == std::ptr::null_mut() {
+                        bar.println(format!(
+                            "Wuffs failed to decode '{}' ({format:?})",
+                            path.display()
+                        ));
+                        wuffs_total_time.entry(format).or_default().push(0);
+                        continue;
+                    }
+                    wuffs_total_time
+                        .entry(format)
+                        .or_default()
+                        .push(start.elapsed().as_nanos());
+                    assert_eq!(width, image.width() as i32);
+                    assert_eq!(height, image.height() as i32);
+                    libc::free(decoded as *mut c_void);
+                };
+            }
+        }
+
+        // Collect image-rs times
+        if reencode {
+            for (format, bytes) in [
+                (ImageFormat::Png, png_bytes),
+                (ImageFormat::WebP, webp_bytes),
+                (ImageFormat::Qoi, qoi_bytes),
+            ] {
+                let Some(bytes) = bytes else {
+                    continue;
+                };
+
+                let start = std::time::Instant::now();
+                image::load_from_memory(&bytes).unwrap();
+                image_total_time
+                    .entry(format)
+                    .or_default()
+                    .push(start.elapsed().as_nanos());
             }
         }
     }
@@ -452,6 +604,7 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
         let speeds: Vec<_> = time
             .iter()
             .zip(total_pixels.iter())
+            .filter(|(&x, y)| x > 0)
             .map(|(&x, &y)| (y as f64 / 1000_000f64) / (x as f64 * 1e-9))
             .collect();
         println!(
@@ -461,11 +614,35 @@ fn measure_decode(corpus: &[PathBuf], format: ImageFormat, rust_only: bool) {
         );
     };
 
-    print_entry("image-rs:", &image_total_time);
+    // PNG results
+    if image_total_time.contains_key(&ImageFormat::Png) {
+        print_entry("image-rs PNG:", &image_total_time[&ImageFormat::Png]);
+    }
+    if wuffs_total_time.contains_key(&ImageFormat::Png) {
+        print_entry("wuffs PNG:", &wuffs_total_time[&ImageFormat::Png]);
+    }
+    print_entry("stb_image PNG:", &stbi_total_time);
     print_entry("zune-png:", &zune_png_total_time);
-    print_entry("stb_image:", &stbi_total_time);
     print_entry("libpng:", &libpng_total_time);
+
+    // WebP results
+    if reencode && ! rust_only { println!(); }
+    if image_total_time.contains_key(&ImageFormat::WebP) {
+        print_entry("image-rs WebP:", &image_total_time[&ImageFormat::WebP]);
+    }
+    if wuffs_total_time.contains_key(&ImageFormat::WebP) {
+        print_entry("wuffs WebP:", &wuffs_total_time[&ImageFormat::WebP]);
+    }
     print_entry("libwebp:", &libwebp_total_time);
+
+    // QOI results
+    if reencode && ! rust_only { println!(); }
+    if image_total_time.contains_key(&ImageFormat::Qoi) {
+        print_entry("image-rs QOI:", &image_total_time[&ImageFormat::Qoi]);
+    }
+    if wuffs_total_time.contains_key(&ImageFormat::Qoi) {
+        print_entry("wuffs QOI:", &wuffs_total_time[&ImageFormat::Qoi]);
+    }
     print_entry("zune-qoi:", &zune_qoi_total_time);
 }
 

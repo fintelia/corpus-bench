@@ -2,6 +2,7 @@
 name = "corpus-bench"
 edition = "2021"
 publish = false
+version = "0.1.0"
 
 [dependencies]
 byteorder-lite = "0.1.0"
@@ -14,7 +15,7 @@ innumerable = "0.1.0"
 libc = "0.2.159"
 miniz_oxide = "0.8.0"
 mtpng = "0.3.5"
-png = { version = "0.17.13", features = [] }
+png = { version = "0.17.13", features = ["unstable"] }
 rand = "0.8.5"
 walkdir = "2.5.0"
 webp = "0.3.0"
@@ -32,7 +33,7 @@ debug = true
 # image = { path = "../image" }
 # fdeflate = { path = "../fdeflate" }
 # miniz_oxide = { path = "../miniz_oxide/miniz_oxide" }
-# png = { path = "../image-png" }
+png = { path = "../image-png" }
 
 [build-dependencies]
 cc = "1.1.24"

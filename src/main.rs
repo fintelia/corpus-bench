@@ -285,7 +285,7 @@ fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
 
 fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) -> (f64, f64) {
     measure_encode(corpus, |buffer, image| {
-        image.write_to(buffer, format).unwrap();
+            image.write_to(buffer, format).unwrap();
     })
 }
 
@@ -378,9 +378,14 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
         };
 
         let start = std::time::Instant::now();
-        let Ok(image) = image::load_from_memory(&bytes) else {
+        // let Ok(image) = image::load_from_memory(&bytes) else {
+        //     continue;
+        // };
+        let image = image::load_from_memory(&bytes).unwrap();
+        if let ColorType::La8 | ColorType::La16 = image.color() {
+            // TODO: wuffs doesn't support LA
             continue;
-        };
+        }
         if !reencode {
             image_total_time
                 .entry(original_format)
@@ -629,7 +634,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
             .map(|(&x, &y)| (y as f64 / 1000_000f64) / (x as f64 * 1e-9))
             .collect();
         println!(
-            "{name: <18}{:>6.1} MP/s (average) {:>6.1} MP/s (geomean)",
+            "{name: <18}{:>6.3} MP/s (average) {:>6.3} MP/s (geomean)",
             mean(&speeds),
             geometric_mean(&speeds),
         );
@@ -822,7 +827,7 @@ fn generate_compressed() {
                     path.file_name().unwrap().to_str().unwrap()
                 );
 
-                if !fs::exists(&output_file).unwrap() {
+                if !Path::new(&output_file).exists() {
                     let mut output_data = Vec::new();
                     let mut encoder = flate2::write::ZlibEncoder::new(
                         &mut output_data,

@@ -285,7 +285,17 @@ fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
 
 fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) -> (f64, f64) {
     measure_encode(corpus, |buffer, image| {
-            image.write_to(buffer, format).unwrap();
+        if format == ImageFormat::Png {
+            let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                buffer,
+                image::codecs::png::CompressionType::Default,
+                image::codecs::png::FilterType::Adaptive,
+            );
+            image.write_with_encoder(encoder).unwrap();
+            return;
+        }
+
+        image.write_to(buffer, format).unwrap();
     })
 }
 
@@ -969,7 +979,7 @@ fn deflate(rust_only: bool) {
                 // zopfli_bytes.push(zopfli_compressed.len());
                 // zopfli_total_time.push(start.elapsed().as_nanos());
 
-                for j in 5..=5 {
+                for j in 5..=7 {
                     let start = Instant::now();
                     let mut encoder = flate2::write::ZlibEncoder::new(
                         Vec::new(),
@@ -990,55 +1000,55 @@ fn deflate(rust_only: bool) {
             return;
         }
 
-        for range in [
-            0..8 * 1024,
-            8 * 1024..64 * 1024,
-            64 * 1024..512 * 1024,
-            512 * 1024..1024 * 1024 * 1024,
-        ] {
-            let ratios: Vec<_> = bytes
-                .iter()
-                .zip(total_bytes.iter())
-                .filter(|(&x, &y)| range.contains(&y))
-                .map(|(&x, &y)| 100.0 * x as f64 / y as f64)
-                .collect();
-            let speeds: Vec<_> = time
-                .iter()
-                .zip(total_bytes.iter())
-                .filter(|(&x, &y)| range.contains(&y))
-                .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
-                .collect();
+        // for range in [
+        //     0..8 * 1024,
+        //     8 * 1024..64 * 1024,
+        //     64 * 1024..512 * 1024,
+        //     512 * 1024..1024 * 1024 * 1024,
+        // ] {
+        //     let ratios: Vec<_> = bytes
+        //         .iter()
+        //         .zip(total_bytes.iter())
+        //         .filter(|(&x, &y)| range.contains(&y))
+        //         .map(|(&x, &y)| 100.0 * x as f64 / y as f64)
+        //         .collect();
+        //     let speeds: Vec<_> = time
+        //         .iter()
+        //         .zip(total_bytes.iter())
+        //         .filter(|(&x, &y)| range.contains(&y))
+        //         .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
+        //         .collect();
 
-            println!(
-                "{: >8}KB {name: <18}{:>6.1} MiB/s    {:02.2}%",
-                range.end / 1024,
-                geometric_mean(&speeds),
-                geometric_mean(&ratios)
-            );
-        }
-        // let ratios: Vec<_> = bytes
-        //     .iter()
-        //     .zip(total_bytes.iter())
-        //     .map(|(&x, &y)| 100.0 * x as f64 / y as f64)
-        //     .collect();
-        // let speeds: Vec<_> = time
-        //     .iter()
-        //     .zip(total_bytes.iter())
-        //     .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
-        //     .collect();
+        //     println!(
+        //         "{: >8}KB {name: <18}{:>6.1} MiB/s    {:02.2}%",
+        //         range.end / 1024,
+        //         geometric_mean(&speeds),
+        //         geometric_mean(&ratios)
+        //     );
+        // }
+        let ratios: Vec<_> = bytes
+            .iter()
+            .zip(total_bytes.iter())
+            .map(|(&x, &y)| 100.0 * x as f64 / y as f64)
+            .collect();
+        let speeds: Vec<_> = time
+            .iter()
+            .zip(total_bytes.iter())
+            .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
+            .collect();
 
-        // println!(
-        //     "{name: <18}{:>6.1} MiB/s    {:02.2}%",
-        //     geometric_mean(&speeds),
-        //     geometric_mean(&ratios)
-        // );
+        println!(
+            "{name: <18}{:>6.1} MiB/s    {:02.2}%",
+            geometric_mean(&speeds),
+            geometric_mean(&ratios)
+        );
     };
 
     print_entry("fdeflate:", &fdeflate_bytes, &fdeflate_total_time);
     print_entry("zopfli:", &zopfli_bytes, &zopfli_total_time);
     for j in 0..=9 {
         print_entry(
-            &format!("miniz_oxide[{}]", j),
+            &format!("flate2[{}]", j),
             &miniz_oxide_bytes[j],
             &miniz_oxide_total_time[j],
         );

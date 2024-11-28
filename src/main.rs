@@ -370,6 +370,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
     let mut wuffs_total_time: HashMap<ImageFormat, Vec<u128>> = HashMap::new();
     let mut libwebp_total_time = Vec::new();
     let mut libpng_total_time = Vec::new();
+    let mut spng_total_time = Vec::new();
     let mut stbi_total_time = Vec::new();
     let mut zune_png_total_time = Vec::new();
     let mut zune_qoi_total_time = Vec::new();
@@ -473,6 +474,17 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
                     assert_eq!(height, image.height() as i32);
                     libc::free(decoded);
                 }
+
+                let mut output = vec![0; image.as_bytes().len()];
+                let mut start = std::time::Instant::now();
+                let mut decoder = spng::Decoder::new(Cursor::new(&bytes))
+                    .with_context_flags(spng::ContextFlags::IGNORE_ADLER32);
+                let (info, mut reader) = decoder.read_info().unwrap();
+                assert_eq!(info.width, image.width());
+                assert_eq!(info.height, image.height());
+                output.resize(reader.output_buffer_size(), 0); // spng doesn't seem to support "expand"
+                reader.next_frame(&mut output).unwrap();
+                spng_total_time.push(start.elapsed().as_nanos());
 
                 let start = std::time::Instant::now();
                 let mut width = 0;
@@ -659,6 +671,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
         print_entry("wuffs PNG:", &wuffs_total_time[&ImageFormat::Png]);
     }
     print_entry("libpng:", &libpng_total_time);
+    print_entry("spng:", &spng_total_time);
     print_entry("stb_image PNG:", &stbi_total_time);
 
     // WebP results

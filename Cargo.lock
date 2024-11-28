@@ -317,6 +317,7 @@ dependencies = [
  "mtpng",
  "png",
  "rand",
+ "spng",
  "walkdir",
  "webp",
  "zopfli",
@@ -871,6 +872,8 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 [[package]]
 name = "png"
 version = "0.17.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52f9d46a34a05a6a57566bc2bfae066ef07585a6e3fa30fbbdff5936380623f0"
 dependencies = [
  "bitflags",
  "crc32fast",
@@ -1129,6 +1132,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
+]
+
+[[package]]
+name = "spng"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c0da5f94532b18dae90294fae1e30c592c0bcc9be972e40f65e680f5b0b6fdb"
+dependencies = [
+ "bitflags",
+ "libc",
+ "spng-sys",
+]
+
+[[package]]
+name = "spng-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ff5b45827d43bfe613c96fdffd015da649d6b5266c9001d2b647394cc6b8155"
+dependencies = [
+ "cc",
+ "libc",
+ "libz-sys",
 ]
 
 [[package]]

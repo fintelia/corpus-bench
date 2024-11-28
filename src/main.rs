@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     ffi::{c_int, c_void},
     fs,
     hash::Hash,
@@ -375,6 +375,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
     let mut zune_png_total_time = Vec::new();
     let mut zune_qoi_total_time = Vec::new();
     let mut total_pixels = Vec::new();
+    let mut names = Vec::new();
 
     let reencode = decode_settings.reencode;
 
@@ -404,6 +405,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
                 .push(start.elapsed().as_nanos());
         }
         total_pixels.push(image.width() as u64 * image.height() as u64);
+        names.push(path.to_str().unwrap().to_string());
 
         // PNG
         let mut reencoded_png = Vec::new();
@@ -644,7 +646,8 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
     }
     bar.finish_and_clear();
 
-    let print_entry = |name: &str, time: &[u128]| {
+    let mut measurements = BTreeMap::new();
+    let mut print_entry = |name: &str, time: &[u128]| {
         if time.is_empty() {
             return;
         }
@@ -660,6 +663,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
             mean(&speeds),
             geometric_mean(&speeds),
         );
+        measurements.insert(name[..name.len() - 1].to_string(), time.to_vec());
     };
 
     // PNG results
@@ -697,6 +701,20 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
         print_entry("wuffs QOI:", &wuffs_total_time[&ImageFormat::Qoi]);
     }
     print_entry("zune-qoi:", &zune_qoi_total_time);
+
+    // Write CSV
+    let mut csv_output = String::new();
+    csv_output.push_str("name,total_pixels,");
+    csv_output.push_str(&measurements.keys().cloned().collect::<Vec<_>>().join(","));
+    csv_output.push('\n');
+    for (i, (name, &num_pixels)) in names.iter_mut().zip(total_pixels.iter()).enumerate() {
+        csv_output.push_str(&format!("{},{num_pixels},", name.replace(',', "_")));
+        for time in measurements.values() {
+            csv_output.push_str(&format!("{:.4},", time[i] as f64 * 1e-6));
+        }
+        csv_output.push('\n');
+    }
+    fs::write("measurements.csv", csv_output).unwrap();
 }
 
 fn measure_png_decode(corpus: &[PathBuf], rust_only: bool, speed: Speed, filter: Filter) {

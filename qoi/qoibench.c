@@ -208,6 +208,9 @@ void *libpng_decode(void *data, int size, int *out_w, int *out_h) {
 	// 16 bit -> 8 bit
 	png_set_strip_16(png);
 	
+	// Ignore checksums
+	png_set_crc_action(png, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
+
 	// 1, 2, 4 bit -> 8 bit
 	if (bitDepth < 8) {
 		png_set_packing(png);

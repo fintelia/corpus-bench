@@ -480,11 +480,17 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
                 let mut output = vec![0; image.as_bytes().len()];
                 let mut start = std::time::Instant::now();
                 let mut decoder = spng::Decoder::new(Cursor::new(&bytes))
-                    .with_context_flags(spng::ContextFlags::IGNORE_ADLER32);
+                    .with_context_flags(spng::ContextFlags::IGNORE_ADLER32)
+                    .with_output_format(match image.color() {
+                        ColorType::L8 => spng::Format::G8,
+                        ColorType::La8 => spng::Format::Ga8,
+                        ColorType::Rgb8 => spng::Format::Rgb8,
+                        ColorType::Rgba8 => spng::Format::Rgba8,
+                        _ => spng::Format::Raw,
+                    });
                 let (info, mut reader) = decoder.read_info().unwrap();
                 assert_eq!(info.width, image.width());
                 assert_eq!(info.height, image.height());
-                output.resize(reader.output_buffer_size(), 0); // spng doesn't seem to support "expand"
                 reader.next_frame(&mut output).unwrap();
                 spng_total_time.push(start.elapsed().as_nanos());
 

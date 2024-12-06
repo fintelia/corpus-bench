@@ -8,7 +8,7 @@ fn main() {
     println!("cargo::rerun-if-changed=wuffs/wuffs-v0.4.c");
 
 
-    println!("cargo::rustc-link-lib=png");
+    println!("cargo::rustc-link-lib=static=png");
 
     cc::Build::new()
         .cargo_warnings(false)

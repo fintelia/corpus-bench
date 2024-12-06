@@ -58,9 +58,9 @@ struct DecodeSettings {
     #[clap(long, default_value = "false")]
     reencode: bool,
 
-    #[clap(short, long, value_enum, default_value_t = Speed::Fast)]
+    #[clap(long, value_enum, default_value_t = Speed::Fast)]
     png_speed: Speed,
-    #[clap(short, long, value_enum, default_value_t = Filter::Adaptive)]
+    #[clap(long, value_enum, default_value_t = Filter::Adaptive)]
     png_filter: Filter,
 }
 

@@ -431,20 +431,16 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
 
             encoder.set_compression(match decode_settings.png_speed {
                 Speed::Fast => png::Compression::Fast,
-                Speed::Default => png::Compression::Default,
-                Speed::Best => png::Compression::Best,
+                Speed::Default => png::Compression::Balanced,
+                Speed::Best => png::Compression::High,
             });
             encoder.set_filter(match decode_settings.png_filter {
-                Filter::None => png::FilterType::NoFilter,
-                Filter::Sub => png::FilterType::Sub,
-                Filter::Up => png::FilterType::Up,
-                Filter::Average => png::FilterType::Avg,
-                Filter::Paeth => png::FilterType::Paeth,
-                Filter::Adaptive => png::FilterType::Paeth,
-            });
-            encoder.set_adaptive_filter(match decode_settings.png_filter {
-                Filter::Adaptive => png::AdaptiveFilterType::Adaptive,
-                _ => png::AdaptiveFilterType::NonAdaptive,
+                Filter::None => png::Filter::NoFilter,
+                Filter::Sub => png::Filter::Sub,
+                Filter::Up => png::Filter::Up,
+                Filter::Average => png::Filter::Avg,
+                Filter::Paeth => png::Filter::Paeth,
+                Filter::Adaptive => png::Filter::Adaptive,
             });
 
             let mut encoder = encoder.write_header().unwrap();
@@ -758,20 +754,16 @@ fn measure_png_decode(corpus: &[PathBuf], rust_only: bool, speed: Speed, filter:
 
             encoder.set_compression(match speed {
                 Speed::Fast => png::Compression::Fast,
-                Speed::Default => png::Compression::Default,
-                Speed::Best => png::Compression::Best,
+                Speed::Default => png::Compression::Balanced,
+                Speed::Best => png::Compression::High,
             });
             encoder.set_filter(match filter {
-                Filter::None => png::FilterType::NoFilter,
-                Filter::Sub => png::FilterType::Sub,
-                Filter::Up => png::FilterType::Up,
-                Filter::Average => png::FilterType::Avg,
-                Filter::Paeth => png::FilterType::Paeth,
-                Filter::Adaptive => png::FilterType::Paeth,
-            });
-            encoder.set_adaptive_filter(match filter {
-                Filter::Adaptive => png::AdaptiveFilterType::Adaptive,
-                _ => png::AdaptiveFilterType::NonAdaptive,
+                Filter::None => png::Filter::NoFilter,
+                Filter::Sub => png::Filter::Sub,
+                Filter::Up => png::Filter::Up,
+                Filter::Average => png::Filter::Avg,
+                Filter::Paeth => png::Filter::Paeth,
+                Filter::Adaptive => png::Filter::Adaptive,
             });
 
             let mut encoder = encoder.write_header().unwrap();

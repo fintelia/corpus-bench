@@ -152,9 +152,9 @@ fn main() {
             );
 
             if !args.image_rs_only {
-                let (bandwidth, compression_ratio) = zune_qoi_encode(&corpus);
+                let (bandwidth, compression_ratio) = measure_libpng_encode(&corpus);
                 println!(
-                    "zune-qoi:      {:>6.1} MP/s  {:02.2}%",
+                    "libpng:        {:>6.1} MP/s  {:02.2}%",
                     bandwidth,
                     compression_ratio * 100.0
                 );
@@ -180,6 +180,13 @@ fn main() {
                 let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::Qoi);
                 println!(
                     "image-rs QOI:  {:>6.1} MP/s  {:02.2}%",
+                    bandwidth,
+                    compression_ratio * 100.0
+                );
+
+                let (bandwidth, compression_ratio) = zune_qoi_encode(&corpus);
+                println!(
+                    "zune-qoi:      {:>6.1} MP/s  {:02.2}%",
                     bandwidth,
                     compression_ratio * 100.0
                 );
@@ -243,6 +250,14 @@ extern "C" {
         channels: *mut c_int,
         desired_channels: c_int,
     ) -> *mut u8;
+
+    fn libpng_encode(
+        buffer: *mut u8,
+        width: c_int,
+        height: c_int,
+        channels: c_int,
+        out_len: *mut c_int,
+    ) -> *mut c_void;
 }
 
 fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
@@ -292,7 +307,7 @@ fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) -> (f64, f64) {
         if format == ImageFormat::Png {
             let encoder = image::codecs::png::PngEncoder::new_with_quality(
                 buffer,
-                image::codecs::png::CompressionType::Default,
+                image::codecs::png::CompressionType::Fast,
                 image::codecs::png::FilterType::Adaptive,
             );
             image.write_with_encoder(encoder).unwrap();
@@ -302,36 +317,56 @@ fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) -> (f64, f64) {
         image.write_to(buffer, format).unwrap();
     })
 }
+
+fn measure_libpng_encode(corpus: &[PathBuf]) -> (f64, f64) {
+    measure_encode(corpus, |buffer, image| unsafe {
+        let mut out_len = 0;
+        let mut output = libpng_encode(
+            image.as_bytes().as_ptr() as *mut u8,
+            image.width() as c_int,
+            image.height() as c_int,
+            if image.color().has_alpha() { 4 } else { 3 },
+            &mut out_len as *mut c_int,
+        );
+        assert!(!output.is_null(), "libpng_encode failed");
+        buffer.write_all(std::slice::from_raw_parts(
+            output as *const u8,
+            out_len as usize,
+        )).unwrap();
+        libc::free(output as *mut c_void);
+    })
+}
+
 // mtpng v0.4.1 breaks other benchmarks by forcing plain old zlib,
 // so we cannot configure other crates with zlib-ng while it's present.
 // TODO: re-enable.
 //
 //fn mtpng_encode(corpus: &[PathBuf]) -> (f64, f64) {
-    // measure_encode(corpus, |buffer, image| {
-    //     let mut options = mtpng::encoder::Options::new();
-    //     options
-    //         .set_compression_level(mtpng::CompressionLevel::Fast)
-    //         .unwrap();
-    //     let mut header = mtpng::Header::new();
-    //     header
-    //         .set_size(image.width() as u32, image.height() as u32)
-    //         .unwrap();
-    //     header
-    //         .set_color(
-    //             if image.color().has_alpha() {
-    //                 mtpng::ColorType::TruecolorAlpha
-    //             } else {
-    //                 mtpng::ColorType::Truecolor
-    //             },
-    //             8,
-    //         )
-    //         .unwrap();
+// measure_encode(corpus, |buffer, image| {
+//     let mut options = mtpng::encoder::Options::new();
+//     options
+//         .set_compression_level(mtpng::CompressionLevel::Fast)
+//         .unwrap();
+//     let mut header = mtpng::Header::new();
+//     header
+//         .set_size(image.width() as u32, image.height() as u32)
+//         .unwrap();
+//     header
+//         .set_color(
+//             if image.color().has_alpha() {
+//                 mtpng::ColorType::TruecolorAlpha
+//             } else {
+//                 mtpng::ColorType::Truecolor
+//             },
+//             8,
+//         )
+//         .unwrap();
 
-    //     let mut encoder = mtpng::encoder::Encoder::new(buffer, &options);
-    //     encoder.write_header(&header).unwrap();
-    //     encoder.write_image_rows(&image.as_bytes()).unwrap();
-    //     encoder.finish().unwrap();
-    //})
+//     let mut encoder = mtpng::encoder::Encoder::new(buffer, &options);
+//     encoder.write_header(&header).unwrap();
+//     encoder.write_image_rows(&image.as_bytes()).unwrap();
+//     encoder.finish().unwrap();
+//})
 //}
 
 fn zune_png_encode(corpus: &[PathBuf]) -> (f64, f64) {

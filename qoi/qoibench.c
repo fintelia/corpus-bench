@@ -127,7 +127,7 @@ void *libpng_encode(void *pixels, int w, int h, int channels, int *out_len) {
 		ERROR("png_jmpbuf");
 	}
 
-	png_set_compression_level(png, 2);
+	png_set_compression_level(png, 1);
 
 	// Output is 8bit depth, RGBA format.
 	png_set_IHDR(

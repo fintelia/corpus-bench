@@ -47,9 +47,7 @@ enum Filter {
 /// The mode to run the benchmark in
 #[derive(clap::Subcommand, Clone, Debug)]
 enum Mode {
-
     #[cfg(feature = "extract-raw")]
-
     ExtractRaw,
     GenerateCompressed,
     Deflate,
@@ -264,103 +262,40 @@ fn deflate(rust_only: bool) {
     let corpus = Corpus::Raw.get_corpus();
     fs::create_dir_all("corpus/raw").unwrap();
 
-    let mut total_bytes = Vec::new();
-    let mut fdeflate_bytes = Vec::new();
-    let mut zopfli_bytes = Vec::new();
-    let mut miniz_oxide_bytes = vec![Vec::new(); 10];
-
-    let mut fdeflate_total_time = Vec::new();
-    let mut zopfli_total_time = Vec::new();
-    let mut miniz_oxide_total_time = vec![Vec::new(); 10];
-
     // let corpus = &corpus[..10];
 
-    let bar = indicatif::ProgressBar::new(corpus.len() as u64);
-    for path in corpus {
-        if let Ok(mut bytes) = fs::read(path) {
-            let uncompressed = fdeflate::decompress_to_vec(&bytes).unwrap();
+    let run_corpus = |corpus: &[PathBuf], name: &str, f: Box<dyn Fn(&[u8]) -> Vec<u8>>| {
+        let mut total_bytes = Vec::new();
+        let mut compressed_bytes = Vec::new();
+        let mut total_time = Vec::new();
 
-            total_bytes.push(uncompressed.len());
+        let bar = indicatif::ProgressBar::new(corpus.len() as u64);
+        for path in corpus {
+            if let Ok(mut bytes) = fs::read(path) {
+                let uncompressed = fdeflate::decompress_to_vec(&bytes).unwrap();
+                let start = Instant::now();
+                let compressed = f(&uncompressed);
+                let duration = start.elapsed().as_nanos();
 
-            let start = Instant::now();
-            let fdeflate_output = fdeflate::compress_to_vec(&uncompressed);
-            fdeflate_bytes.push(fdeflate_output.len()); //fdeflate::compress_to_vec(&uncompressed).len();
-            fdeflate_total_time.push(start.elapsed().as_nanos());
+                assert_eq!(
+                    uncompressed,
+                    fdeflate::decompress_to_vec(&compressed).unwrap()
+                );
 
-            assert_eq!(
-                fdeflate::decompress_to_vec(&fdeflate_output).unwrap(),
-                uncompressed
-            );
-
-            if !rust_only {
-                // let start = Instant::now();
-                // let mut zopfli_compressed = Vec::new();
-                // zopfli::compress(
-                //     zopfli::Options {
-                //         iteration_count: NonZeroU64::new(1).unwrap(),
-                //         ..Default::default()
-                //     },
-                //     zopfli::Format::Zlib,
-                //     &*uncompressed,
-                //     &mut zopfli_compressed,
-                // )
-                // .unwrap();
-                // zopfli_bytes.push(zopfli_compressed.len());
-                // zopfli_total_time.push(start.elapsed().as_nanos());
-
-                for j in 1..=3 {
-                    let start = Instant::now();
-                    let mut encoder = flate2::write::ZlibEncoder::new(
-                        Vec::new(),
-                        flate2::Compression::new(j as u32),
-                    );
-                    encoder.write_all(&uncompressed).unwrap();
-                    miniz_oxide_bytes[j].push(encoder.flush_finish().unwrap().len());
-                    miniz_oxide_total_time[j].push(start.elapsed().as_nanos());
-                }
+                total_bytes.push(uncompressed.len());
+                compressed_bytes.push(compressed.len());
+                total_time.push(duration);
             }
+            bar.inc(1);
         }
-        bar.inc(1);
-    }
-    bar.finish_and_clear();
+        bar.finish_and_clear();
 
-    let print_entry = |name: &str, bytes: &[usize], time: &[u128]| {
-        if time.is_empty() {
-            return;
-        }
-
-        // for range in [
-        //     0..8 * 1024,
-        //     8 * 1024..64 * 1024,
-        //     64 * 1024..512 * 1024,
-        //     512 * 1024..1024 * 1024 * 1024,
-        // ] {
-        //     let ratios: Vec<_> = bytes
-        //         .iter()
-        //         .zip(total_bytes.iter())
-        //         .filter(|(&x, &y)| range.contains(&y))
-        //         .map(|(&x, &y)| 100.0 * x as f64 / y as f64)
-        //         .collect();
-        //     let speeds: Vec<_> = time
-        //         .iter()
-        //         .zip(total_bytes.iter())
-        //         .filter(|(&x, &y)| range.contains(&y))
-        //         .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
-        //         .collect();
-
-        //     println!(
-        //         "{: >8}KB {name: <18}{:>6.1} MiB/s    {:02.2}%",
-        //         range.end / 1024,
-        //         geometric_mean(&speeds),
-        //         geometric_mean(&ratios)
-        //     );
-        // }
-        let ratios: Vec<_> = bytes
+        let ratios: Vec<_> = compressed_bytes
             .iter()
             .zip(total_bytes.iter())
             .map(|(&x, &y)| 100.0 * x as f64 / y as f64)
             .collect();
-        let speeds: Vec<_> = time
+        let speeds: Vec<_> = total_time
             .iter()
             .zip(total_bytes.iter())
             .map(|(&x, &y)| (y as f64 / (1 << 20) as f64) / (x as f64 * 1e-9))
@@ -371,20 +306,50 @@ fn deflate(rust_only: bool) {
             geometric_mean(&speeds),
             geometric_mean(&ratios)
         );
-        // println!(
-        //     "{name: <12}    (avg){:>6.1} MiB/s    {:02.2}%",
-        //     mean(&speeds),
-        //     mean(&ratios)
-        // );
     };
 
-    print_entry("fdeflate:", &fdeflate_bytes, &fdeflate_total_time);
-    print_entry("zopfli:", &zopfli_bytes, &zopfli_total_time);
-    for j in 0..=9 {
-        print_entry(
-            &format!("zlib[{}]", j),
-            &miniz_oxide_bytes[j],
-            &miniz_oxide_total_time[j],
+    for j in 3..=3 {
+        run_corpus(
+            &corpus,
+            &format!("fdeflate[{j}]:"),
+            Box::new(move |uncompressed| {
+                fdeflate::compress_to_vec_with_level(uncompressed, j as u8)
+            }),
         );
+    }
+
+    if !rust_only {
+        for j in 1..=1 {
+            run_corpus(
+                &corpus,
+                &format!("miniz_oxide[{j}]:"),
+                Box::new(move |uncompressed| {
+                    let mut encoder = flate2::write::ZlibEncoder::new(
+                        Vec::new(),
+                        flate2::Compression::new(j as u32),
+                    );
+                    encoder.write_all(&uncompressed).unwrap();
+                    encoder.flush_finish().unwrap()
+                }),
+            );
+        }
+        // run_corpus(
+        //     &corpus,
+        //     "zopfli:",
+        //     Box::new(|uncompressed| {
+        //         let mut zopfli_compressed = Vec::new();
+        //         zopfli::compress(
+        //             zopfli::Options {
+        //                 iteration_count: NonZeroU64::new(1).unwrap(),
+        //                 ..Default::default()
+        //             },
+        //             zopfli::Format::Zlib,
+        //             &*uncompressed,
+        //             &mut zopfli_compressed,
+        //         )
+        //         .unwrap();
+        //         zopfli_compressed
+        //     }),
+        // );
     }
 }

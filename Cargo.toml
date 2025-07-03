@@ -7,20 +7,23 @@ publish = false
 byteorder-lite = "0.1.0"
 clap = { version = "4.5.4", features = ["derive"] }
 fdeflate = "0.3.4"
-flate2 = { version = "1.0.33", features = ["miniz_oxide"] }
-image = "0.25.1"
+flate2 = { version = "1.0.33", features = ["zlib"] }
+image = { version = "0.25.1", optional = true }
 indicatif = "0.17.8"
 innumerable = "0.1.0"
 miniz_oxide = "0.8.0"
-mtpng = "0.3.5"
-png = { version = "0.17.13", features = ["unstable"] }
+# mtpng = "0.3.5"
+# png = { version = "0.17.13", features = ["unstable"] }
 rand = "0.8.5"
 walkdir = "2.5.0"
-webp = "0.3.0"
+# webp = "0.3.0"
 zopfli = "0.8.1"
 zune-inflate = "0.2.54"
-zune-png = "0.5.0-rc0"
-zune-qoi = "0.4.10"
+# zune-png = "0.5.0-rc0"
+# zune-qoi = "0.4.10"
+
+[features]
+extract-raw = ["image"]
 
 [profile.release]
 debug = true
@@ -29,5 +32,5 @@ debug = true
 [patch.crates-io]
 #image-webp = { path = "../image-webp" }
 #image = { path = "../image" }
-# fdeflate = { path = "../fdeflate" }
+fdeflate = { path = "../fdeflate" }
 # miniz_oxide = { path = "../miniz_oxide/miniz_oxide" }

@@ -98,8 +98,17 @@ fn mean(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len() as f64
 }
 
+static EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() {
     let args = Args::parse();
+
+    ctrlc::set_handler(move || {
+        if EXIT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            std::process::exit(0);
+        }
+    })
+    .expect("Error setting Ctrl-C handler");
 
     match args.mode {
         #[cfg(feature = "extract-raw")]
@@ -271,6 +280,10 @@ fn deflate(rust_only: bool) {
 
         let bar = indicatif::ProgressBar::new(corpus.len() as u64);
         for path in corpus {
+            if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+
             if let Ok(mut bytes) = fs::read(path) {
                 let uncompressed = fdeflate::decompress_to_vec(&bytes).unwrap();
                 let start = Instant::now();
@@ -308,7 +321,7 @@ fn deflate(rust_only: bool) {
         );
     };
 
-    for j in 3..=3 {
+    for j in 7..=7 {
         run_corpus(
             &corpus,
             &format!("fdeflate[{j}]:"),

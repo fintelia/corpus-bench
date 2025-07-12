@@ -6,6 +6,7 @@ publish = false
 [dependencies]
 byteorder-lite = "0.1.0"
 clap = { version = "4.5.4", features = ["derive"] }
+ctrlc = "3.4.7"
 fdeflate = "0.3.4"
 flate2 = { version = "1.0.33", features = ["zlib"] }
 image = { version = "0.25.1", optional = true }

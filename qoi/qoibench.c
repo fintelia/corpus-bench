@@ -127,7 +127,7 @@ void *libpng_encode(void *pixels, int w, int h, int channels, int *out_len) {
 		ERROR("png_jmpbuf");
 	}
 
-	png_set_compression_level(png, 1);
+	png_set_compression_level(png, 9);
 
 	// Output is 8bit depth, RGBA format.
 	png_set_IHDR(
@@ -148,8 +148,8 @@ void *libpng_encode(void *pixels, int w, int h, int channels, int *out_len) {
 
 	libpng_write_t write_data = {
 		.size = 0,
-		.capacity = w * h * channels /* * 11/10 + 10240 */,
-		.data = malloc(w * h * channels /* * 11/10 + 10240 */)
+		.capacity = w * h * channels * 11/10 + 10240,
+		.data = malloc(w * h * channels * 11/10 + 10240)
 	};
 
 	png_set_rows(png, info, row_pointers);

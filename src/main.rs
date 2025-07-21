@@ -137,59 +137,22 @@ fn main() {
             let corpus = c.corpus.get_corpus();
             println!("Running encoding benchmark with corpus: {:?}", c.corpus);
 
-            let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::Png);
-            println!(
-                "image-rs PNG:  {:>6.1} MP/s  {:02.2}%",
-                bandwidth,
-                compression_ratio * 100.0
-            );
-
-            let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::WebP);
-            println!(
-                "image-rs WebP: {:>6.1} MP/s  {:02.2}%",
-                bandwidth,
-                compression_ratio * 100.0
-            );
+            image_rs_encode(&corpus, ImageFormat::Png);
+            image_rs_encode(&corpus, ImageFormat::WebP);
 
             if !args.image_rs_only {
-                let (bandwidth, compression_ratio) = measure_libpng_encode(&corpus);
-                println!(
-                    "libpng:        {:>6.1} MP/s  {:02.2}%",
-                    bandwidth,
-                    compression_ratio * 100.0
-                );
-
-                let (bandwidth, compression_ratio) = zune_png_encode(&corpus);
-                println!(
-                    "zune-png:      {:>6.1} MP/s  {:02.2}%",
-                    bandwidth,
-                    compression_ratio * 100.0
-                );
+                libwebp_encode(&corpus);
+                measure_libpng_encode(&corpus);
+                zune_png_encode(&corpus);
 
                 // mtpng v0.4.1 breaks other benchmarks by forcing plain old zlib,
                 // so we cannot configure other crates with zlib-ng while it's present.
                 // TODO: re-enable.
                 //
-                // let (bandwidth, compression_ratio) = mtpng_encode(&corpus);
-                // println!(
-                //     "mtpng:         {:>6.1} MP/s  {:02.2}%",
-                //     bandwidth,
-                //     compression_ratio * 100.0
-                // );
+                // mtpng_encode(&corpus);
 
-                let (bandwidth, compression_ratio) = image_rs_encode(&corpus, ImageFormat::Qoi);
-                println!(
-                    "image-rs QOI:  {:>6.1} MP/s  {:02.2}%",
-                    bandwidth,
-                    compression_ratio * 100.0
-                );
-
-                let (bandwidth, compression_ratio) = zune_qoi_encode(&corpus);
-                println!(
-                    "zune-qoi:      {:>6.1} MP/s  {:02.2}%",
-                    bandwidth,
-                    compression_ratio * 100.0
-                );
+                image_rs_encode(&corpus, ImageFormat::Qoi);
+                zune_qoi_encode(&corpus);
             }
         }
         Mode::Decode(decode_settings) => {
@@ -262,8 +225,9 @@ extern "C" {
 
 fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
     corpus: &[PathBuf],
+    name: &str,
     mut f: F,
-) -> (f64, f64) {
+) {
     let mut total_time = 0;
     let mut total_bytes = 0;
     let mut uncompressed_bytes = 0;
@@ -298,12 +262,27 @@ fn measure_encode<F: FnMut(&mut Cursor<Vec<u8>>, &DynamicImage)>(
     bar.finish_and_clear();
 
     let bandwidth = (total_pixels as f64 / (1 << 20) as f64) / (total_time as f64 * 1e-9);
+    let bandwidth2 = (uncompressed_bytes as f64 / (1 << 20) as f64) / (total_time as f64 * 1e-9);
     let compression_ratio = total_bytes as f64 / uncompressed_bytes as f64;
-    (bandwidth, compression_ratio)
+
+    println!(
+        "{:<14} {:>6.1} MP/s  {:>6.1} MiB/s  {:02.2}%",
+        format!("{name}:"),
+        bandwidth,
+        bandwidth2,
+        compression_ratio * 100.0
+    );
 }
 
-fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) -> (f64, f64) {
-    measure_encode(corpus, |buffer, image| {
+fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) {
+    let name = match format {
+        ImageFormat::Png => "image-rs PNG",
+        ImageFormat::WebP => "image-rs WebP",
+        ImageFormat::Qoi => "image-rs QOI",
+        _ => unreachable!(),
+    };
+
+    measure_encode(corpus, name, |buffer, image| {
         if format == ImageFormat::Png {
             let encoder = image::codecs::png::PngEncoder::new_with_quality(
                 buffer,
@@ -318,8 +297,8 @@ fn image_rs_encode(corpus: &[PathBuf], format: ImageFormat) -> (f64, f64) {
     })
 }
 
-fn measure_libpng_encode(corpus: &[PathBuf]) -> (f64, f64) {
-    measure_encode(corpus, |buffer, image| unsafe {
+fn measure_libpng_encode(corpus: &[PathBuf]) {
+    measure_encode(corpus, "libpng", |buffer, image| unsafe {
         let mut out_len = 0;
         let mut output = libpng_encode(
             image.as_bytes().as_ptr() as *mut u8,
@@ -329,10 +308,12 @@ fn measure_libpng_encode(corpus: &[PathBuf]) -> (f64, f64) {
             &mut out_len as *mut c_int,
         );
         assert!(!output.is_null(), "libpng_encode failed");
-        buffer.write_all(std::slice::from_raw_parts(
-            output as *const u8,
-            out_len as usize,
-        )).unwrap();
+        buffer
+            .write_all(std::slice::from_raw_parts(
+                output as *const u8,
+                out_len as usize,
+            ))
+            .unwrap();
         libc::free(output as *mut c_void);
     })
 }
@@ -369,8 +350,8 @@ fn measure_libpng_encode(corpus: &[PathBuf]) -> (f64, f64) {
 //})
 //}
 
-fn zune_png_encode(corpus: &[PathBuf]) -> (f64, f64) {
-    measure_encode(corpus, |buffer, image| {
+fn zune_png_encode(corpus: &[PathBuf]) {
+    measure_encode(corpus, "zune-png", |buffer, image| {
         let mut encoder = zune_png::PngEncoder::new(
             image.as_bytes(),
             zune_png::zune_core::options::EncoderOptions::new(
@@ -388,8 +369,8 @@ fn zune_png_encode(corpus: &[PathBuf]) -> (f64, f64) {
     })
 }
 
-fn zune_qoi_encode(corpus: &[PathBuf]) -> (f64, f64) {
-    measure_encode(corpus, |buffer, image| {
+fn zune_qoi_encode(corpus: &[PathBuf]) {
+    measure_encode(corpus, "zune-qoi", |buffer, image| {
         let mut encoder = zune_qoi::QoiEncoder::new(
             image.as_bytes(),
             zune_qoi::zune_core::options::EncoderOptions::new(
@@ -404,6 +385,40 @@ fn zune_qoi_encode(corpus: &[PathBuf]) -> (f64, f64) {
             ),
         );
         buffer.write_all(&encoder.encode().unwrap()).unwrap()
+    })
+}
+
+fn libwebp_encode(corpus: &[PathBuf]) {
+    measure_encode(corpus, "libwebp", |buffer, mut image| {
+        let mut image = image.clone();
+        if image.color() == ColorType::L8 {
+            image = DynamicImage::ImageRgb8(image.to_rgb8());
+        }
+        if image.color() == ColorType::La8 {
+            image = DynamicImage::ImageRgba8(image.to_rgba8());
+        }
+
+        let mut encoder = webp::Encoder::new(
+            image.as_bytes(),
+            if image.color().has_alpha() {
+                webp::PixelLayout::Rgba
+            } else {
+                webp::PixelLayout::Rgb
+            },
+            image.width(),
+            image.height(),
+        );
+
+        let mut config = webp::WebPConfig::new().unwrap();
+        // config.method = 0;
+        // config.quality = 0.0;
+        config.method = 6;
+        config.quality = 100.0;
+        config.lossless = 1;
+
+        buffer
+            .write_all(&*encoder.encode_advanced(&config).unwrap())
+            .unwrap();
     })
 }
 
@@ -707,7 +722,7 @@ fn measure_decode(corpus: &[PathBuf], rust_only: bool, decode_settings: DecodeSe
             .map(|(&x, &y)| (y as f64 / 1000_000f64) / (x as f64 * 1e-9))
             .collect();
         println!(
-            "{name: <18}{:>6.3} MP/s (average) {:>6.3} MP/s (geomean)",
+            "{name: <18}{:>7.2} MP/s (average) {:>7.2} MP/s (geomean)",
             mean(&speeds),
             geometric_mean(&speeds),
         );

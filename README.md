@@ -11,6 +11,7 @@ formats and libraries. Still very much WIP and not ready for general use.
 2. Populate *corpus/cwebp_qoi_bench* by converting those PNGs to WebP images (optional):
     ```
     cd corpus
+    mkdir cwebp_qoi_bench
     find qoi_benchmark_suite -name "*.png" | parallel -eta cwebp -exact -lossless {} -o cwebp_qoi_bench/{#}-{%}.webp
     ```
 

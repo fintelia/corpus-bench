@@ -1,0 +1,23 @@
+[package]
+name = "decode-png"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+harness = { path = "../harness" }
+image = { version = "0.25.6", default-features = false, features = [
+    "png",
+    "webp",
+    "qoi",
+    "ico",
+] }
+libc = "0.2.174"
+libz-sys = { version = "1.1.8", default-features = false, features = [
+    "zlib-ng",
+] }
+spng = "0.1.0"
+zune-png = "0.5.0-rc0"
+
+[build-dependencies]
+cc = "1.2.31"

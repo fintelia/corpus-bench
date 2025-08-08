@@ -7,3 +7,6 @@ members = ["decode-png", "deflate", "harness"]
 # fdeflate = { path = "../fdeflate" }
 image = { path = "../image" }
 png = { path = "../image-png" }
+
+[patch."https://github.com/fintelia/fdeflate"]
+fdeflate = { path = "../fdeflate" }

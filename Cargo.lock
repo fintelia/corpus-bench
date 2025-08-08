@@ -242,7 +242,7 @@ dependencies = [
 name = "deflate"
 version = "0.1.0"
 dependencies = [
- "fdeflate",
+ "fdeflate 0.3.7",
  "flate2",
  "harness",
  "miniz_oxide",
@@ -253,6 +253,13 @@ name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
+
+[[package]]
+name = "fdeflate"
+version = "0.3.7"
+dependencies = [
+ "simd-adler32",
+]
 
 [[package]]
 name = "fdeflate"
@@ -292,7 +299,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "ctrlc",
- "fdeflate",
+ "fdeflate 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "image",
  "indicatif",
  "innumerable",
@@ -466,7 +473,7 @@ version = "0.18.0-rc.3"
 dependencies = [
  "bitflags 2.9.1",
  "crc32fast",
- "fdeflate",
+ "fdeflate 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "flate2",
  "miniz_oxide",
 ]

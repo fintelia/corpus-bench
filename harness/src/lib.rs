@@ -139,7 +139,7 @@ pub fn run(corpus: Corpus, print_ratio: bool, mut impls: Vec<RunImplFn>) {
 
             let start = std::time::Instant::now();
             let output = impl_fn(&input);
-            speeds.push(output.len() as f64 / (start.elapsed().as_secs_f64() * 1024.0 * 1024.0));
+            speeds.push(input.len() as f64 / (start.elapsed().as_secs_f64() * 1024.0 * 1024.0));
 
             if print_ratio {
                 ratios.push(100.0 * output.len() as f64 / input.len() as f64);

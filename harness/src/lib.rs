@@ -7,6 +7,7 @@ use std::{
 use clap::ValueEnum;
 use image::{ColorType, ImageDecoder, ImageReader};
 use rand::prelude::*;
+use regex::Regex;
 use walkdir::WalkDir;
 
 /// The corpus to choose from
@@ -58,6 +59,56 @@ fn mean(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len() as f64
 }
 
+struct Filter {
+    done: bool,
+    single: bool,
+    regex: Option<Regex>,
+}
+impl Filter {
+    fn load() -> Self {
+        let args = std::env::args().collect::<Vec<_>>();
+        if args.iter().any(|a| a == "--single") {
+            return Filter {
+                done: false,
+                single: true,
+                regex: None,
+            };
+        }
+
+        if let Some(i) = args.iter().position(|x| x == "--filter") {
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                return Filter {
+                    done: false,
+                    single: false,
+                    regex: Some(Regex::new(&args[i + 1]).expect("Invalid regex pattern")),
+                };
+            }
+        }
+        Filter {
+            done: false,
+            single: false,
+            regex: None,
+        }
+    }
+
+    fn skip(&mut self, name: &str) -> bool {
+        if self.done {
+            return true;
+        }
+
+        if self.single {
+            self.done = true;
+            return false;
+        }
+
+        if let Some(ref regex) = self.regex {
+            return !regex.is_match(name);
+        }
+
+        false
+    }
+}
+
 // pub type EncodeFn<T> = (&'static str, Box<dyn FnMut(&T) -> Vec<u8>>);
 // pub fn encode<T, F>(
 //     corpus: Corpus,
@@ -103,25 +154,16 @@ fn mean(v: &[f64]) -> f64 {
 
 pub type RunImplFn = (String, Box<dyn FnMut(&[u8]) -> Vec<u8>>);
 
-pub fn run(corpus: Corpus, print_ratio: bool, mut impls: Vec<RunImplFn>) {
-    let args = std::env::args().collect::<Vec<_>>();
-    let range = if let Some(i) = args.iter().position(|x| x == "--single") {
-        if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-            let j = impls
-                .iter()
-                .position(|(name, _)| name == &args[i + 1])
-                .expect("Invalid implementation name");
-            j..=j
-        } else {
-            0..=0
-        }
-    } else {
-        0..=impls.len() - 1
-    };
+pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
+    let mut filter = Filter::load();
 
     handle_ctrlc();
     let corpus_files = corpus.get_corpus();
-    'outer: for (name, impl_fn) in &mut impls[range] {
+    'outer: for (name, mut impl_fn) in impls {
+        if filter.skip(&name) {
+            continue;
+        }
+
         let bar = indicatif::ProgressBar::new(corpus_files.len() as u64);
 
         let mut speeds = Vec::new();
@@ -166,25 +208,16 @@ pub fn run(corpus: Corpus, print_ratio: bool, mut impls: Vec<RunImplFn>) {
 
 pub type DecodeImplFn = (String, Box<dyn FnMut(&[u8])>);
 
-pub fn decode(corpus: Corpus, mut impls: Vec<DecodeImplFn>) {
-    let args = std::env::args().collect::<Vec<_>>();
-    let range = if let Some(i) = args.iter().position(|x| x == "--single") {
-        if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-            let j = impls
-                .iter()
-                .position(|(name, _)| name == &args[i + 1])
-                .expect("Invalid implementation name");
-            j..=j
-        } else {
-            0..=0
-        }
-    } else {
-        0..=impls.len() - 1
-    };
+pub fn decode(corpus: Corpus, impls: Vec<DecodeImplFn>) {
+    let mut filter = Filter::load();
 
     handle_ctrlc();
     let corpus_files = corpus.get_corpus();
-    'outer: for (name, impl_fn) in &mut impls[range] {
+    'outer: for (name, mut impl_fn) in impls {
+        if filter.skip(&name) {
+            continue;
+        }
+
         let bar = indicatif::ProgressBar::new(corpus_files.len() as u64);
 
         let mut speeds = Vec::new();
@@ -225,6 +258,56 @@ pub fn decode(corpus: Corpus, mut impls: Vec<DecodeImplFn>) {
             "{name: <18}{:>7.2} MP/s (average) {:>7.2} MP/s (geomean)",
             mean(&speeds),
             geometric_mean(&speeds),
+        );
+    }
+
+    innumerable::print_counts();
+}
+
+pub type EncodeImplFn = (String, Box<dyn FnMut(&image::DynamicImage) -> Vec<u8>>);
+pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
+    let mut filter = Filter::load();
+
+    handle_ctrlc();
+    let corpus_files = corpus.get_corpus();
+    'outer: for (name, mut impl_fn) in impls {
+        if filter.skip(&name) {
+            continue;
+        }
+
+        let bar = indicatif::ProgressBar::new(corpus_files.len() as u64);
+
+        let mut speeds = Vec::new();
+        let mut ratios = Vec::new();
+        for path in &corpus_files {
+            if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+                bar.finish_and_clear();
+                break 'outer;
+            }
+
+            let input = fs::read(&path).unwrap();
+            let Ok(img) = image::load_from_memory(input) else {
+                continue;
+            };
+
+            let start = std::time::Instant::now();
+            let output = impl_fn(&img);
+            speeds.push(
+                img.width() as f64 * img.height() as f64 * 1e-6 / start.elapsed().as_secs_f64(),
+            );
+            ratios.push(output.len() as f64 / img.as_bytes().len() as f64 * 100.0);
+
+            bar.inc(1);
+        }
+        bar.finish_and_clear();
+
+        let name = format!("{name}:");
+        println!(
+            "{name: <18}{:>7.2} MP/s (average) {:>7.2} MP/s (geomean)    {:6.2}% (average) {:6.2}% (geomean)",
+            mean(&speeds),
+            geometric_mean(&speeds),
+            mean(&ratios),
+            geometric_mean(&ratios),
         );
     }
 

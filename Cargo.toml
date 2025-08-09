@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 
-members = ["decode-png", "deflate", "harness"]
+members = ["decode-png", "deflate", "encode-png", "harness"]
 
 [patch.crates-io]
-# fdeflate = { path = "../fdeflate" }
+fdeflate = { path = "../fdeflate" }
 image = { path = "../image" }
 png = { path = "../image-png" }
 

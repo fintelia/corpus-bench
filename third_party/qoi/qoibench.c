@@ -112,7 +112,7 @@ void libpng_encode_callback(png_structp png_ptr, png_bytep data, png_size_t leng
 	write_data->size += length;
 }
 
-void *libpng_encode(void *pixels, int w, int h, int channels, int *out_len) {
+void *libpng_encode(void *pixels, int w, int h, int channels, int bit_depth, int level, int *out_len) {
 	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	if (!png) {
 		ERROR("png_create_write_struct");
@@ -127,28 +127,39 @@ void *libpng_encode(void *pixels, int w, int h, int channels, int *out_len) {
 		ERROR("png_jmpbuf");
 	}
 
-	// Output is 8bit depth, RGBA format.
+	int color_type = PNG_COLOR_TYPE_GRAY;
+	if (channels == 2)
+		color_type = PNG_COLOR_TYPE_GRAY_ALPHA;
+	else if (channels == 3)
+		color_type = PNG_COLOR_TYPE_RGB;
+	else if (channels == 4)
+		color_type = PNG_COLOR_TYPE_RGBA;
+
 	png_set_IHDR(
 		png,
 		info,
 		w, h,
-		8,
-		channels == 3 ? PNG_COLOR_TYPE_RGB : PNG_COLOR_TYPE_RGBA,
+		bit_depth,
+		color_type,
 		PNG_INTERLACE_NONE,
 		PNG_COMPRESSION_TYPE_DEFAULT,
-		PNG_FILTER_TYPE_DEFAULT
-	);
+		PNG_FILTER_TYPE_DEFAULT);
+	png_set_compression_level(png, level);
 
 	png_bytep row_pointers[h];
 	for(int y = 0; y < h; y++){
 		row_pointers[y] = ((unsigned char *)pixels + y * w * channels);
 	}
 
+	// Allocate a bit extra for levels 0 and 1.
+	int capacity = w * h * channels * bit_depth / 8;
+	if (level <= 1)
+		capacity = capacity * 12 / 10 + 1024;
+
 	libpng_write_t write_data = {
 		.size = 0,
-		.capacity = w * h * channels,
-		.data = malloc(w * h * channels)
-	};
+		.capacity = capacity,
+		.data = malloc(capacity)};
 
 	png_set_rows(png, info, row_pointers);
 	png_set_write_fn(png, &write_data, libpng_encode_callback, NULL);
@@ -379,191 +390,191 @@ void benchmark_print_result(benchmark_result_t res) {
 	} while (0)
 
 
-benchmark_result_t benchmark_image(const char *path) {
-	int encoded_png_size;
-	int encoded_qoi_size;
-	int w;
-	int h;
-	int channels;
+// benchmark_result_t benchmark_image(const char *path) {
+// 	int encoded_png_size;
+// 	int encoded_qoi_size;
+// 	int w;
+// 	int h;
+// 	int channels;
 
-	// Load the encoded PNG, encoded QOI and raw pixels into memory
-	if(!stbi_info(path, &w, &h, &channels)) {
-		ERROR("Error decoding header %s", path);
-	}
+// 	// Load the encoded PNG, encoded QOI and raw pixels into memory
+// 	if(!stbi_info(path, &w, &h, &channels)) {
+// 		ERROR("Error decoding header %s", path);
+// 	}
 
-	if (channels != 3) {
-		channels = 4;
-	}
+// 	if (channels != 3) {
+// 		channels = 4;
+// 	}
 
-	void *pixels = (void *)stbi_load(path, &w, &h, NULL, channels);
-	void *encoded_png = fload(path, &encoded_png_size);
-	void *encoded_qoi = qoi_encode(pixels, &(qoi_desc){
-			.width = w,
-			.height = h, 
-			.channels = channels,
-			.colorspace = QOI_SRGB
-		}, &encoded_qoi_size);
+// 	void *pixels = (void *)stbi_load(path, &w, &h, NULL, channels);
+// 	void *encoded_png = fload(path, &encoded_png_size);
+// 	void *encoded_qoi = qoi_encode(pixels, &(qoi_desc){
+// 			.width = w,
+// 			.height = h, 
+// 			.channels = channels,
+// 			.colorspace = QOI_SRGB
+// 		}, &encoded_qoi_size);
 
-	if (!pixels || !encoded_qoi || !encoded_png) {
-		ERROR("Error encoding %s", path);
-	}
+// 	if (!pixels || !encoded_qoi || !encoded_png) {
+// 		ERROR("Error encoding %s", path);
+// 	}
 
-	// Verify QOI Output
+// 	// Verify QOI Output
 
-	if (!opt_noverify) {
-		qoi_desc dc;
-		void *pixels_qoi = qoi_decode(encoded_qoi, encoded_qoi_size, &dc, channels);
-		if (memcmp(pixels, pixels_qoi, w * h * channels) != 0) {
-			ERROR("QOI roundtrip pixel mismatch for %s", path);
-		}
-		free(pixels_qoi);
-	}
-
-
-
-	benchmark_result_t res = {0};
-	res.count = 1;
-	res.raw_size = w * h * channels;
-	res.px = w * h;
-	res.w = w;
-	res.h = h;
+// 	if (!opt_noverify) {
+// 		qoi_desc dc;
+// 		void *pixels_qoi = qoi_decode(encoded_qoi, encoded_qoi_size, &dc, channels);
+// 		if (memcmp(pixels, pixels_qoi, w * h * channels) != 0) {
+// 			ERROR("QOI roundtrip pixel mismatch for %s", path);
+// 		}
+// 		free(pixels_qoi);
+// 	}
 
 
-	// Decoding
 
-	if (!opt_nodecode) {
-		if (!opt_nopng) {
-			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LIBPNG].decode_time, {
-				int dec_w, dec_h;
-				void *dec_p = libpng_decode(encoded_png, encoded_png_size, &dec_w, &dec_h);
-				free(dec_p);
-			});
-
-			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[STBI].decode_time, {
-				int dec_w, dec_h, dec_channels;
-				void *dec_p = stbi_load_from_memory(encoded_png, encoded_png_size, &dec_w, &dec_h, &dec_channels, 4);
-				free(dec_p);
-			});
-		}
-
-		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].decode_time, {
-			qoi_desc desc;
-			void *dec_p = qoi_decode(encoded_qoi, encoded_qoi_size, &desc, 4);
-			free(dec_p);
-		});
-	}
+// 	benchmark_result_t res = {0};
+// 	res.count = 1;
+// 	res.raw_size = w * h * channels;
+// 	res.px = w * h;
+// 	res.w = w;
+// 	res.h = h;
 
 
-	// Encoding
-	if (!opt_noencode) {
-		if (!opt_nopng) {
-			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LIBPNG].encode_time, {
-				int enc_size;
-				void *enc_p = libpng_encode(pixels, w, h, channels, &enc_size);
-				res.libs[LIBPNG].size = enc_size;
-				free(enc_p);
-			});
+// 	// Decoding
 
-			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[STBI].encode_time, {
-				int enc_size = 0;
-				stbi_write_png_to_func(stbi_write_callback, &enc_size, w, h, channels, pixels, 0);
-				res.libs[STBI].size = enc_size;
-			});
-		}
+// 	if (!opt_nodecode) {
+// 		if (!opt_nopng) {
+// 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LIBPNG].decode_time, {
+// 				int dec_w, dec_h;
+// 				void *dec_p = libpng_decode(encoded_png, encoded_png_size, &dec_w, &dec_h);
+// 				free(dec_p);
+// 			});
 
-		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].encode_time, {
-			int enc_size;
-			void *enc_p = qoi_encode(pixels, &(qoi_desc){
-				.width = w,
-				.height = h, 
-				.channels = channels,
-				.colorspace = QOI_SRGB
-			}, &enc_size);
-			res.libs[QOI].size = enc_size;
-			free(enc_p);
-		});
-	}
+// 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[STBI].decode_time, {
+// 				int dec_w, dec_h, dec_channels;
+// 				void *dec_p = stbi_load_from_memory(encoded_png, encoded_png_size, &dec_w, &dec_h, &dec_channels, 4);
+// 				free(dec_p);
+// 			});
+// 		}
 
-	free(pixels);
-	free(encoded_png);
-	free(encoded_qoi);
+// 		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].decode_time, {
+// 			qoi_desc desc;
+// 			void *dec_p = qoi_decode(encoded_qoi, encoded_qoi_size, &desc, 4);
+// 			free(dec_p);
+// 		});
+// 	}
 
-	return res;
-}
 
-void benchmark_directory(const char *path, benchmark_result_t *grand_total) {
-	DIR *dir = opendir(path);
-	if (!dir) {
-		ERROR("Couldn't open directory %s", path);
-	}
+// 	// Encoding
+// 	if (!opt_noencode) {
+// 		if (!opt_nopng) {
+// 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LIBPNG].encode_time, {
+// 				int enc_size;
+// 				void *enc_p = libpng_encode(pixels, w, h, channels, &enc_size);
+// 				res.libs[LIBPNG].size = enc_size;
+// 				free(enc_p);
+// 			});
 
-	struct dirent *file;
+// 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[STBI].encode_time, {
+// 				int enc_size = 0;
+// 				stbi_write_png_to_func(stbi_write_callback, &enc_size, w, h, channels, pixels, 0);
+// 				res.libs[STBI].size = enc_size;
+// 			});
+// 		}
 
-	if (!opt_norecurse) {
-		for (int i = 0; (file = readdir(dir)) != NULL; i++) {
-			if (
-				file->d_type & DT_DIR &&
-				strcmp(file->d_name, ".") != 0 &&
-				strcmp(file->d_name, "..") != 0
-			) {
-				char subpath[1024];
-				snprintf(subpath, 1024, "%s/%s", path, file->d_name);
-				benchmark_directory(subpath, grand_total);
-			}
-		}
-		rewinddir(dir);
-	}
+// 		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].encode_time, {
+// 			int enc_size;
+// 			void *enc_p = qoi_encode(pixels, &(qoi_desc){
+// 				.width = w,
+// 				.height = h, 
+// 				.channels = channels,
+// 				.colorspace = QOI_SRGB
+// 			}, &enc_size);
+// 			res.libs[QOI].size = enc_size;
+// 			free(enc_p);
+// 		});
+// 	}
 
-	benchmark_result_t dir_total = {0};
+// 	free(pixels);
+// 	free(encoded_png);
+// 	free(encoded_qoi);
+
+// 	return res;
+// }
+
+// void benchmark_directory(const char *path, benchmark_result_t *grand_total) {
+// 	DIR *dir = opendir(path);
+// 	if (!dir) {
+// 		ERROR("Couldn't open directory %s", path);
+// 	}
+
+// 	struct dirent *file;
+
+// 	if (!opt_norecurse) {
+// 		for (int i = 0; (file = readdir(dir)) != NULL; i++) {
+// 			if (
+// 				file->d_type & DT_DIR &&
+// 				strcmp(file->d_name, ".") != 0 &&
+// 				strcmp(file->d_name, "..") != 0
+// 			) {
+// 				char subpath[1024];
+// 				snprintf(subpath, 1024, "%s/%s", path, file->d_name);
+// 				benchmark_directory(subpath, grand_total);
+// 			}
+// 		}
+// 		rewinddir(dir);
+// 	}
+
+// 	benchmark_result_t dir_total = {0};
 	
-	int has_shown_head = 0;
-	for (int i = 0; (file = readdir(dir)) != NULL; i++) {
-		if (strcmp(file->d_name + strlen(file->d_name) - 4, ".png") != 0) {
-			continue;
-		}
+// 	int has_shown_head = 0;
+// 	for (int i = 0; (file = readdir(dir)) != NULL; i++) {
+// 		if (strcmp(file->d_name + strlen(file->d_name) - 4, ".png") != 0) {
+// 			continue;
+// 		}
 
-		if (!has_shown_head) {
-			has_shown_head = 1;
-			printf("## Benchmarking %s/*.png -- %d runs\n\n", path, opt_runs);
-		}
+// 		if (!has_shown_head) {
+// 			has_shown_head = 1;
+// 			printf("## Benchmarking %s/*.png -- %d runs\n\n", path, opt_runs);
+// 		}
 
-		char *file_path = malloc(strlen(file->d_name) + strlen(path)+8);
-		sprintf(file_path, "%s/%s", path, file->d_name);
+// 		char *file_path = malloc(strlen(file->d_name) + strlen(path)+8);
+// 		sprintf(file_path, "%s/%s", path, file->d_name);
 		
-		benchmark_result_t res = benchmark_image(file_path);
+// 		benchmark_result_t res = benchmark_image(file_path);
 
-		if (!opt_onlytotals) {
-			printf("## %s size: %dx%d\n", file_path, res.w, res.h);
-			benchmark_print_result(res);
-		}
+// 		if (!opt_onlytotals) {
+// 			printf("## %s size: %dx%d\n", file_path, res.w, res.h);
+// 			benchmark_print_result(res);
+// 		}
 
-		free(file_path);
+// 		free(file_path);
 		
-		dir_total.count++;
-		dir_total.raw_size += res.raw_size;
-		dir_total.px += res.px;
-		for (int i = 0; i < BENCH_COUNT; ++i) {
-			dir_total.libs[i].encode_time += res.libs[i].encode_time;
-			dir_total.libs[i].decode_time += res.libs[i].decode_time;
-			dir_total.libs[i].size += res.libs[i].size;
-		}
+// 		dir_total.count++;
+// 		dir_total.raw_size += res.raw_size;
+// 		dir_total.px += res.px;
+// 		for (int i = 0; i < BENCH_COUNT; ++i) {
+// 			dir_total.libs[i].encode_time += res.libs[i].encode_time;
+// 			dir_total.libs[i].decode_time += res.libs[i].decode_time;
+// 			dir_total.libs[i].size += res.libs[i].size;
+// 		}
 
-		grand_total->count++;
-		grand_total->raw_size += res.raw_size;
-		grand_total->px += res.px;
-		for (int i = 0; i < BENCH_COUNT; ++i) {
-			grand_total->libs[i].encode_time += res.libs[i].encode_time;
-			grand_total->libs[i].decode_time += res.libs[i].decode_time;
-			grand_total->libs[i].size += res.libs[i].size;
-		}
-	}
-	closedir(dir);
+// 		grand_total->count++;
+// 		grand_total->raw_size += res.raw_size;
+// 		grand_total->px += res.px;
+// 		for (int i = 0; i < BENCH_COUNT; ++i) {
+// 			grand_total->libs[i].encode_time += res.libs[i].encode_time;
+// 			grand_total->libs[i].decode_time += res.libs[i].decode_time;
+// 			grand_total->libs[i].size += res.libs[i].size;
+// 		}
+// 	}
+// 	closedir(dir);
 
-	if (dir_total.count > 0) {
-		printf("## Total for %s\n", path);
-		benchmark_print_result(dir_total);
-	}
-}
+// 	if (dir_total.count > 0) {
+// 		printf("## Total for %s\n", path);
+// 		benchmark_print_result(dir_total);
+// 	}
+// }
 
 // int main(int argc, char **argv) {
 // 	if (argc < 3) {

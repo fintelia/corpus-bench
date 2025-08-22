@@ -58,6 +58,15 @@ fn geometric_mean(v: &[f64]) -> f64 {
 fn mean(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len() as f64
 }
+fn mean_ratio(n: &[f64], d: &[f64]) -> f64 {
+    mean(n) / mean(d)
+}
+fn geometric_mean_ratio(n: &[f64], d: &[f64]) -> f64 {
+    let exponent = 1.0 / n.len() as f64;
+    n.iter()
+        .zip(d)
+        .fold(1.0, |acc, (&n, &d)| acc * (n / d).powf(exponent))
+}
 
 struct Filter {
     done: bool,
@@ -187,6 +196,12 @@ pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
                 ratios.push(100.0 * output.len() as f64 / input.len() as f64);
             }
 
+            let roundtrip = fdeflate::decompress_to_vec(&output).unwrap();
+            assert_eq!(
+                roundtrip, input,
+                "Decompression failed for {name} on {path:?}"
+            );
+
             bar.inc(1);
         }
         bar.finish_and_clear();
@@ -194,7 +209,7 @@ pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
         let name = format!("{name}:");
         if print_ratio {
             println!(
-                "{name: <12}{:>6.1} MiB/s    {:02.2}%",
+                "{name: <12}{:>6.2} MiB/s    {:02.2}%",
                 geometric_mean(&speeds),
                 geometric_mean(&ratios)
             );
@@ -278,7 +293,8 @@ pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
         let bar = indicatif::ProgressBar::new(corpus_files.len() as u64);
 
         let mut speeds = Vec::new();
-        let mut ratios = Vec::new();
+        let mut compressed_bytes = Vec::new();
+        let mut total_bytes = Vec::new();
         for path in &corpus_files {
             if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
                 bar.finish_and_clear();
@@ -286,8 +302,18 @@ pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
             }
 
             let input = fs::read(&path).unwrap();
-            let Ok(img) = image::load_from_memory(input) else {
+            let Ok(img) = image::load_from_memory(&input) else {
                 continue;
+            };
+
+            if img.width() > 16383 || img.height() > 16383 {
+                continue;
+            }
+
+            let img: image::DynamicImage = if img.color().has_alpha() {
+                img.to_rgba8().into()
+            } else {
+                img.to_rgb8().into()
             };
 
             let start = std::time::Instant::now();
@@ -295,7 +321,11 @@ pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
             speeds.push(
                 img.width() as f64 * img.height() as f64 * 1e-6 / start.elapsed().as_secs_f64(),
             );
-            ratios.push(output.len() as f64 / img.as_bytes().len() as f64 * 100.0);
+            compressed_bytes.push(output.len() as f64);
+            total_bytes.push(img.as_bytes().len() as f64);
+
+            let roundtrip = image::load_from_memory(&output).unwrap();
+            assert_eq!(img.as_bytes(), roundtrip.as_bytes());
 
             bar.inc(1);
         }
@@ -306,8 +336,8 @@ pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
             "{name: <18}{:>7.2} MP/s (average) {:>7.2} MP/s (geomean)    {:6.2}% (average) {:6.2}% (geomean)",
             mean(&speeds),
             geometric_mean(&speeds),
-            mean(&ratios),
-            geometric_mean(&ratios),
+            mean_ratio(&compressed_bytes, &total_bytes) * 100.0,
+            geometric_mean_ratio(&compressed_bytes, &total_bytes) * 100.0,
         );
     }
 

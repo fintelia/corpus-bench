@@ -98,5 +98,19 @@ fn main() {
         ));
     }
 
+    impls.push((
+        format!("qoi"),
+        Box::new(|img: &DynamicImage| {
+            let img: DynamicImage = if img.color().has_alpha() {
+                img.to_rgba8().into()
+            } else {
+                img.to_rgb8().into()
+            };
+
+            qoi::encode_to_vec(img.as_bytes(), img.width(), img.height())
+                .unwrap()
+        }),
+    ));
+
     harness::encode(Corpus::QoiBench, impls);
 }

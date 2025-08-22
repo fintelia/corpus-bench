@@ -10,3 +10,7 @@ png = { path = "../image-png" }
 
 [patch."https://github.com/fintelia/fdeflate"]
 fdeflate = { path = "../fdeflate" }
+
+
+[profile.release]
+debug = true

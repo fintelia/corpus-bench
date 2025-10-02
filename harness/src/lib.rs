@@ -166,6 +166,8 @@ pub type RunImplFn = (String, Box<dyn FnMut(&[u8]) -> Vec<u8>>);
 pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
     let mut filter = Filter::load();
 
+    let fast = std::env::args().any(|a| a == "--fast");
+
     handle_ctrlc();
     let corpus_files = corpus.get_corpus();
     'outer: for (name, mut impl_fn) in impls {
@@ -183,6 +185,11 @@ pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
                 break 'outer;
             }
 
+            if fast && crc32fast::hash(path.to_string_lossy().as_bytes()) > u32::MAX / 10 {
+                bar.inc(1);
+                continue;
+            }
+
             let mut input = fs::read(&path).unwrap();
             if corpus == Corpus::Raw {
                 input = fdeflate::decompress_to_vec(&input).unwrap();
@@ -198,6 +205,19 @@ pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
 
             let roundtrip = fdeflate::decompress_to_vec(&output).unwrap();
             assert_eq!(
+                roundtrip.len(),
+                input.len(),
+                "Decompression length mismatch for {name} on {path:?}"
+            );
+            for (i, (&a, &b)) in input.iter().zip(&roundtrip).enumerate() {
+                if a != b {
+                    panic!(
+                        "Decompression mismatch for {name} on {path:?} at byte {i}: {a:02x} != {b:02x} (len = {})",
+                        input.len()
+                    );
+                }
+            }
+            assert_eq!(
                 roundtrip, input,
                 "Decompression failed for {name} on {path:?}"
             );
@@ -209,12 +229,12 @@ pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
         let name = format!("{name}:");
         if print_ratio {
             println!(
-                "{name: <12}{:>6.2} MiB/s    {:02.2}%",
+                "{name: <20}{:>7.1} MiB/s    {:02.2}%",
                 geometric_mean(&speeds),
                 geometric_mean(&ratios)
             );
         } else {
-            println!("{name: <12}{:>6.1} MiB/s", geometric_mean(&speeds));
+            println!("{name: <20}{:>7.1} MiB/s", geometric_mean(&speeds));
         }
     }
 
@@ -225,6 +245,8 @@ pub type DecodeImplFn = (String, Box<dyn FnMut(&[u8])>);
 
 pub fn decode(corpus: Corpus, impls: Vec<DecodeImplFn>) {
     let mut filter = Filter::load();
+
+    let fast = std::env::args().any(|a| a == "--fast");
 
     handle_ctrlc();
     let corpus_files = corpus.get_corpus();
@@ -240,6 +262,11 @@ pub fn decode(corpus: Corpus, impls: Vec<DecodeImplFn>) {
             if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
                 bar.finish_and_clear();
                 break 'outer;
+            }
+
+            if fast && crc32fast::hash(path.to_string_lossy().as_bytes()) > u32::MAX / 10 {
+                bar.inc(1);
+                continue;
             }
 
             let input = fs::read(&path).unwrap();
@@ -283,6 +310,8 @@ pub type EncodeImplFn = (String, Box<dyn FnMut(&image::DynamicImage) -> Vec<u8>>
 pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
     let mut filter = Filter::load();
 
+    let fast = std::env::args().any(|a| a == "--fast");
+
     handle_ctrlc();
     let corpus_files = corpus.get_corpus();
     'outer: for (name, mut impl_fn) in impls {
@@ -299,6 +328,11 @@ pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
             if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
                 bar.finish_and_clear();
                 break 'outer;
+            }
+
+            if fast && crc32fast::hash(path.to_string_lossy().as_bytes()) > u32::MAX / 10 {
+                bar.inc(1);
+                continue;
             }
 
             let input = fs::read(&path).unwrap();

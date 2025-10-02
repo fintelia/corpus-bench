@@ -1,5 +1,5 @@
 use harness::{Corpus, EncodeImplFn};
-use image::{ColorType, DynamicImage, ImageEncoder};
+use image::{ColorType, DynamicImage};
 
 unsafe extern "C" {
     fn libpng_encode(
@@ -47,7 +47,7 @@ fn encode_image_rs(img: &DynamicImage, compression: png::DeflateCompression) -> 
 }
 
 fn main() {
-    let mut impls: Vec<EncodeImplFn> = Vec::new();
+    let mut impls: Vec<EncodeImplFn<DynamicImage, Vec<u8>>> = Vec::new();
 
     impls.push((
         format!("image-png0"),
@@ -62,7 +62,12 @@ fn main() {
             encode_image_rs(img, png::DeflateCompression::FdeflateUltraFast)
         }),
     ));
-
+    impls.push((
+        format!("image-png-rle"),
+        Box::new(move |img: &DynamicImage| {
+            encode_image_rs(img, png::DeflateCompression::FdeflateRle)
+        }),
+    ));
     for level in 1..=9 {
         impls.push((
             format!("image-png{level}"),
@@ -107,10 +112,36 @@ fn main() {
                 img.to_rgb8().into()
             };
 
-            qoi::encode_to_vec(img.as_bytes(), img.width(), img.height())
-                .unwrap()
+            qoi::encode_to_vec(img.as_bytes(), img.width(), img.height()).unwrap()
         }),
     ));
 
-    harness::encode(Corpus::QoiBench, impls);
+    let prepare = Box::new(
+        |input: &[u8]| -> Option<(f64, usize, image::DynamicImage)> {
+            let Ok(img) = image::load_from_memory(&input) else {
+                return None;
+            };
+
+            if img.width() > 16383 || img.height() > 16383 {
+                return None;
+            }
+
+            let img: image::DynamicImage = if img.color().has_alpha() {
+                img.to_rgba8().into()
+            } else {
+                img.to_rgb8().into()
+            };
+
+            let megapixels = img.width() as f64 * img.height() as f64 * 1e-6;
+
+            Some((megapixels, img.as_bytes().len(), img))
+        },
+    );
+
+    let check = Box::new(|encoded: &Vec<u8>, original: &DynamicImage| -> bool {
+        let roundtrip = image::load_from_memory(&encoded).unwrap();
+        original.as_bytes() == roundtrip.as_bytes()
+    });
+
+    harness::encode(Corpus::QoiBench, prepare, impls, check, "MP/s");
 }

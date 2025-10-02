@@ -1,11 +1,9 @@
 use std::{
     fs,
-    io::Cursor,
     path::{Path, PathBuf},
 };
 
 use clap::ValueEnum;
-use image::{ColorType, ImageDecoder, ImageReader};
 use rand::prelude::*;
 use regex::Regex;
 use walkdir::WalkDir;
@@ -118,196 +116,36 @@ impl Filter {
     }
 }
 
-// pub type EncodeFn<T> = (&'static str, Box<dyn FnMut(&T) -> Vec<u8>>);
-// pub fn encode<T, F>(
-//     corpus: Corpus,
-//     size_unit: &'static str,
-//     mut load: F,
-//     mut impls: Vec<EncodeFn<T>>,
-// ) where
-//     F: FnMut(&[u8]) -> Option<(T, f64)>,
-// {
-//     handle_ctrlc();
-//     let corpus = corpus.get_corpus();
-//     let bar = indicatif::ProgressBar::new(corpus.len() as u64);
-//     for (name, impl_fn) in impls.iter_mut() {
-//         bar.reset();
-
-//         let mut speeds = Vec::new();
-//         let mut ratios = Vec::new();
-//         for path in &corpus {
-//             if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
-//                 bar.finish_and_clear();
-//                 return;
-//             }
-
-//             let bytes = fs::read(&path).unwrap();
-//             if let Some((data, size)) = load(&bytes) {
-//                 let start = std::time::Instant::now();
-//                 let output = impl_fn(&data);
-//                 speeds.push(size / start.elapsed().as_secs_f64());
-//                 ratios.push(output.len() as f64 / bytes.len() as f64);
-//             }
-
-//             bar.inc(1);
-//         }
-//         bar.finish_and_clear();
-
-//         println!(
-//             "{name: <12}{:>6.1} {size_unit}/s    {:02.2}%",
-//             geometric_mean(&speeds),
-//             geometric_mean(&ratios)
-//         );
-//     }
-// }
-
-pub type RunImplFn = (String, Box<dyn FnMut(&[u8]) -> Vec<u8>>);
-
-pub fn run(corpus: Corpus, print_ratio: bool, impls: Vec<RunImplFn>) {
-    let mut filter = Filter::load();
-
-    let fast = std::env::args().any(|a| a == "--fast");
-
-    handle_ctrlc();
-    let corpus_files = corpus.get_corpus();
-    'outer: for (name, mut impl_fn) in impls {
-        if filter.skip(&name) {
-            continue;
-        }
-
-        let bar = indicatif::ProgressBar::new(corpus_files.len() as u64);
-
-        let mut speeds = Vec::new();
-        let mut ratios = Vec::new();
-        for path in &corpus_files {
-            if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
-                bar.finish_and_clear();
-                break 'outer;
-            }
-
-            if fast && crc32fast::hash(path.to_string_lossy().as_bytes()) > u32::MAX / 10 {
-                bar.inc(1);
-                continue;
-            }
-
-            let mut input = fs::read(&path).unwrap();
-            if corpus == Corpus::Raw {
-                input = fdeflate::decompress_to_vec(&input).unwrap();
-            }
-
-            let start = std::time::Instant::now();
-            let output = impl_fn(&input);
-            speeds.push(input.len() as f64 / (start.elapsed().as_secs_f64() * 1024.0 * 1024.0));
-
-            if print_ratio {
-                ratios.push(100.0 * output.len() as f64 / input.len() as f64);
-            }
-
-            let roundtrip = fdeflate::decompress_to_vec(&output).unwrap();
-            assert_eq!(
-                roundtrip.len(),
-                input.len(),
-                "Decompression length mismatch for {name} on {path:?}"
-            );
-            for (i, (&a, &b)) in input.iter().zip(&roundtrip).enumerate() {
-                if a != b {
-                    panic!(
-                        "Decompression mismatch for {name} on {path:?} at byte {i}: {a:02x} != {b:02x} (len = {})",
-                        input.len()
-                    );
-                }
-            }
-            assert_eq!(
-                roundtrip, input,
-                "Decompression failed for {name} on {path:?}"
-            );
-
-            bar.inc(1);
-        }
-        bar.finish_and_clear();
-
-        let name = format!("{name}:");
-        if print_ratio {
-            println!(
-                "{name: <20}{:>7.1} MiB/s    {:02.2}%",
-                geometric_mean(&speeds),
-                geometric_mean(&ratios)
-            );
-        } else {
-            println!("{name: <20}{:>7.1} MiB/s", geometric_mean(&speeds));
-        }
+pub trait ToCompressedSize {
+    fn to_compressed_size(&self) -> Option<usize>;
+}
+impl ToCompressedSize for &[u8] {
+    fn to_compressed_size(&self) -> Option<usize> {
+        Some(self.len())
     }
-
-    innumerable::print_counts();
+}
+impl ToCompressedSize for Vec<u8> {
+    fn to_compressed_size(&self) -> Option<usize> {
+        Some(self.len())
+    }
 }
 
-pub type DecodeImplFn = (String, Box<dyn FnMut(&[u8])>);
-
-pub fn decode(corpus: Corpus, impls: Vec<DecodeImplFn>) {
-    let mut filter = Filter::load();
-
-    let fast = std::env::args().any(|a| a == "--fast");
-
-    handle_ctrlc();
-    let corpus_files = corpus.get_corpus();
-    'outer: for (name, mut impl_fn) in impls {
-        if filter.skip(&name) {
-            continue;
-        }
-
-        let bar = indicatif::ProgressBar::new(corpus_files.len() as u64);
-
-        let mut speeds = Vec::new();
-        for path in &corpus_files {
-            if EXIT.load(std::sync::atomic::Ordering::SeqCst) {
-                bar.finish_and_clear();
-                break 'outer;
-            }
-
-            if fast && crc32fast::hash(path.to_string_lossy().as_bytes()) > u32::MAX / 10 {
-                bar.inc(1);
-                continue;
-            }
-
-            let input = fs::read(&path).unwrap();
-            let size = {
-                let Ok(decoder) = ImageReader::new(Cursor::new(&input))
-                    .with_guessed_format()
-                    .unwrap()
-                    .into_decoder()
-                else {
-                    continue;
-                };
-
-                if let ColorType::La8 | ColorType::La16 = decoder.color_type() {
-                    continue;
-                }
-
-                decoder.dimensions()
-            };
-            // let size = reader.into_dimensions().unwrap();
-
-            let start = std::time::Instant::now();
-            impl_fn(&input);
-            speeds.push(size.0 as f64 * size.1 as f64 * 1e-6 / start.elapsed().as_secs_f64());
-
-            bar.inc(1);
-        }
-        bar.finish_and_clear();
-
-        let name = format!("{name}:");
-        println!(
-            "{name: <18}{:>7.2} MP/s (average) {:>7.2} MP/s (geomean)",
-            mean(&speeds),
-            geometric_mean(&speeds),
-        );
+impl ToCompressedSize for () {
+    fn to_compressed_size(&self) -> Option<usize> {
+        None
     }
-
-    innumerable::print_counts();
 }
 
-pub type EncodeImplFn = (String, Box<dyn FnMut(&image::DynamicImage) -> Vec<u8>>);
-pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
+pub type PrepareFn<T> = Box<dyn FnMut(&[u8]) -> Option<(f64, usize, T)>>;
+pub type EncodeImplFn<T, U> = (String, Box<dyn FnMut(&T) -> U>);
+pub type CheckFn<T, U> = Box<dyn FnMut(&U, &T) -> bool>;
+pub fn encode<T, U: ToCompressedSize>(
+    corpus: Corpus,
+    mut prepare: PrepareFn<T>,
+    impls: Vec<EncodeImplFn<T, U>>,
+    mut check: CheckFn<T, U>,
+    bandwidth_unit: &'static str,
+) {
     let mut filter = Filter::load();
 
     let fast = std::env::args().any(|a| a == "--fast");
@@ -336,43 +174,40 @@ pub fn encode(corpus: Corpus, impls: Vec<EncodeImplFn>) {
             }
 
             let input = fs::read(&path).unwrap();
-            let Ok(img) = image::load_from_memory(&input) else {
+            let Some((size, bytes, img)) = prepare(&input) else {
                 continue;
-            };
-
-            if img.width() > 16383 || img.height() > 16383 {
-                continue;
-            }
-
-            let img: image::DynamicImage = if img.color().has_alpha() {
-                img.to_rgba8().into()
-            } else {
-                img.to_rgb8().into()
             };
 
             let start = std::time::Instant::now();
             let output = impl_fn(&img);
-            speeds.push(
-                img.width() as f64 * img.height() as f64 * 1e-6 / start.elapsed().as_secs_f64(),
-            );
-            compressed_bytes.push(output.len() as f64);
-            total_bytes.push(img.as_bytes().len() as f64);
+            speeds.push(size / start.elapsed().as_secs_f64());
+            total_bytes.push(bytes as f64);
+            if let Some(bytes) = output.to_compressed_size() {
+                compressed_bytes.push(bytes as f64);
+            }
 
-            let roundtrip = image::load_from_memory(&output).unwrap();
-            assert_eq!(img.as_bytes(), roundtrip.as_bytes());
+            check(&output, &img);
 
             bar.inc(1);
         }
         bar.finish_and_clear();
 
         let name = format!("{name}:");
-        println!(
-            "{name: <18}{:>7.2} MP/s (average) {:>7.2} MP/s (geomean)    {:6.2}% (average) {:6.2}% (geomean)",
-            mean(&speeds),
-            geometric_mean(&speeds),
-            mean_ratio(&compressed_bytes, &total_bytes) * 100.0,
-            geometric_mean_ratio(&compressed_bytes, &total_bytes) * 100.0,
-        );
+        if compressed_bytes.is_empty() {
+            println!(
+                "{name: <18}{:>7.1} {bandwidth_unit} (average) {:>7.1} {bandwidth_unit} (geomean)",
+                mean(&speeds),
+                geometric_mean(&speeds),
+            );
+        } else {
+            println!(
+                "{name: <18}{:>7.1} {bandwidth_unit} (average) {:>7.1} {bandwidth_unit} (geomean)    {:6.2}% (average) {:6.2}% (geomean)",
+                mean(&speeds),
+                geometric_mean(&speeds),
+                mean_ratio(&compressed_bytes, &total_bytes) * 100.0,
+                geometric_mean_ratio(&compressed_bytes, &total_bytes) * 100.0,
+            );
+        }
     }
 
     innumerable::print_counts();

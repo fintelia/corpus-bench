@@ -387,6 +387,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "inflate"
+version = "0.1.0"
+dependencies = [
+ "fdeflate",
+ "flate2",
+ "harness",
+ "libdeflater",
+ "miniz_oxide",
+]
+
+[[package]]
 name = "innumerable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

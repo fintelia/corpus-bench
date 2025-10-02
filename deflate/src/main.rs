@@ -5,13 +5,24 @@ use harness::{Corpus, RunImplFn};
 fn main() {
     let mut impls: Vec<RunImplFn> = Vec::new();
 
-    for level in 0..=9 {
+    impls.push((
+        "fdeflate0".to_string(),
+        Box::new(|bytes: &[u8]| fdeflate::compress_to_vec_with_level(bytes, 0)),
+    ));
+    impls.push((
+        "fdeflate-ultra".to_string(),
+        Box::new(|bytes: &[u8]| fdeflate::compress_to_vec_ultra_fast(bytes)),
+    ));
+    impls.push((
+        "fdeflate-rle".to_string(),
+        Box::new(|bytes: &[u8]| fdeflate::compress_to_vec_rle(bytes)),
+    ));
+    for level in 1..=9 {
         impls.push((
             format!("fdeflate{level}"),
             Box::new(move |bytes: &[u8]| fdeflate::compress_to_vec_with_level(bytes, level)),
         ));
     }
-
     for level in 0..=9 {
         impls.push((
             format!("zlib-rs{level}"),
@@ -21,12 +32,12 @@ fn main() {
                     flate2::Compression::new(level as u32),
                 );
                 encoder.write_all(&uncompressed).unwrap();
-                encoder.flush_finish().unwrap()
+                encoder.finish().unwrap()
             }),
         ));
     }
 
-    for level in 0..=9 {
+    for level in 0..=10 {
         impls.push((
             format!("miniz_oxide{level}"),
             Box::new(move |uncompressed| {

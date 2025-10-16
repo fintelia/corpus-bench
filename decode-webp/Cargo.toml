@@ -1,0 +1,13 @@
+[package]
+name = "decode-webp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+harness = { path = "../harness" }
+image = { version = "0.25.8", default-features = false, features = ["webp"] }
+webp = { version = "0.3.1", default-features = false }
+libc = "0.2.174"
+
+[build-dependencies]
+cc = "1.2.31"

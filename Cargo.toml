@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["decode-png", "deflate", "encode-png", "inflate", "harness", "download-and-generate"]
+members = ["decode-png", "deflate", "encode-png", "inflate", "harness", "download-and-generate", "decode-webp"]
 
 [patch.crates-io]
 fdeflate = { path = "../fdeflate" }

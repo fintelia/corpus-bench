@@ -5,9 +5,13 @@ formats and libraries. Still very much WIP and not ready for general use.
 
 ## Getting Started
 
-### Configure corpora
+### Download corpora
 
-1. Download and extract [qoi-benchmark suite](https://qoiformat.org/benchmark/qoi_benchmark_suite.tar) to *corpus/qoi_benchmark_suite*.
+1. Download and extract [qoi-benchmark suite](https://qoiformat.org/benchmark/qoi_benchmark_suite.tar):
+    ```
+    cargo run --release -p download-and-generate
+    ```
+
 2. Populate *corpus/cwebp_qoi_bench* by converting those PNGs to WebP images (optional):
     ```
     cd corpus
@@ -17,21 +21,22 @@ formats and libraries. Still very much WIP and not ready for general use.
 
 ### Run benchmarks
 
-Run PNG decoding benchmarks:
+Run various benchmarks:
 ```
-cargo +nightly run --release -- decode qoi-bench
+cargo run --release -p decode-png
+cargo run --release -p encode-png
+cargo run --release -p deflate
+cargo run --release -p inflate
 ```
-Run WebP decoding benchmarks:
+
+Run benchmarks against 10% of the corpus:
 ```
-cargo +nightly run --release -- decode cwebp-qoi-bench
+cargo run --release -p encode-png -- --fast
 ```
-To drill down into the performance of a particular file, in any format:
+
+Filter which benchmark to run using a regex:
 ```
-cargo +nightly run --release -- decode-single /path/to/file
-```
-There are other benchmarks available. For all available options see:
-```
-cargo +nightly run --release -- --help
+cargo run --release -p encode-png -- --filter "image-png[1-3]"
 ```
 
 ## Gathering statistics
@@ -40,12 +45,11 @@ Corpus bench integrates with the `innumerable` crate to enable easy gathering of
 fine grained statistics about the encoding and decoding process. Any calls to
 `innumerable::event!` will be aggregated and reported at the end of the run.
 
-The execution times for every single file will also be exported in CSV format.
+<!--The execution times for every single file will also be exported in CSV format.-->
 
 ## Some helpful commands
 
 Generate flamegraph for decoding:
 ```bash
-RUSTFLAGS="-C force-frame-pointers=yes" cargo +nightly flamegraph -c "record -F 10000 --call-graph=fp -g" -- decode qoi-bench
+RUSTFLAGS="-C force-frame-pointers=yes" cargo +nightly flamegraph -c "record -F 10000 --call-graph=fp -g" -p decode-png
 ```
-

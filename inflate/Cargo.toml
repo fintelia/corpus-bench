@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-fdeflate = { git = "https://github.com/fintelia/fdeflate", branch = "fast-levels2" }
+fdeflate = "0.3.7"
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 harness = { path = "../harness" }
 miniz_oxide = "0.8.9"

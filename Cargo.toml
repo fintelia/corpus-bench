@@ -3,14 +3,5 @@ resolver = "2"
 
 members = ["decode-png", "deflate", "encode-png", "inflate", "harness", "download-and-generate", "decode-webp"]
 
-[patch.crates-io]
-fdeflate = { path = "../fdeflate" }
-# image = { path = "../image" }
-png = { path = "../image-png" }
-
-[patch."https://github.com/fintelia/fdeflate"]
-fdeflate = { path = "../fdeflate" }
-
-
 [profile.release]
 debug = true

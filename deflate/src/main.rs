@@ -6,23 +6,9 @@ fn main() {
     let mut impls: Vec<EncodeImplFn<Vec<u8>, Vec<u8>>> = Vec::new();
 
     impls.push((
-        "fdeflate0".to_string(),
-        Box::new(|bytes| fdeflate::compress_to_vec_with_level(bytes, 0)),
-    ));
-    impls.push((
         "fdeflate-ultra".to_string(),
-        Box::new(|bytes| fdeflate::compress_to_vec_ultra_fast(bytes)),
+        Box::new(|bytes| fdeflate::compress_to_vec(bytes)),
     ));
-    impls.push((
-        "fdeflate-rle".to_string(),
-        Box::new(|bytes| fdeflate::compress_to_vec_rle(bytes)),
-    ));
-    for level in 1..=9 {
-        impls.push((
-            format!("fdeflate{level}"),
-            Box::new(move |bytes| fdeflate::compress_to_vec_with_level(bytes, level)),
-        ));
-    }
     for level in 0..=9 {
         impls.push((
             format!("zlib-rs{level}"),

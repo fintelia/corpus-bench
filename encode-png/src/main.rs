@@ -62,12 +62,6 @@ fn main() {
             encode_image_rs(img, png::DeflateCompression::FdeflateUltraFast)
         }),
     ));
-    impls.push((
-        format!("image-png-rle"),
-        Box::new(move |img: &DynamicImage| {
-            encode_image_rs(img, png::DeflateCompression::FdeflateRle)
-        }),
-    ));
     for level in 1..=9 {
         impls.push((
             format!("image-png{level}"),

@@ -6,7 +6,7 @@ members = ["decode-png", "deflate", "encode-png", "inflate", "harness", "downloa
 # [patch.crates-io]
 # image = { path = "../image" }
 
-# [patch."https://github.com/fintelia/fdeflate"]
+# [patch."https://github.com/image-rs/fdeflate"]
 # fdeflate = { path = "../fdeflate" }
 
 # [patch."https://github.com/fintelia/image-png"]

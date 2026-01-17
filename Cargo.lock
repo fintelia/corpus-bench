@@ -305,7 +305,7 @@ dependencies = [
 name = "deflate"
 version = "0.1.0"
 dependencies = [
- "fdeflate 0.3.7 (git+https://github.com/fintelia/fdeflate)",
+ "fdeflate 0.4.0",
  "flate2",
  "harness",
  "libdeflater",
@@ -399,14 +399,6 @@ name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
-dependencies = [
- "simd-adler32",
-]
-
-[[package]]
-name = "fdeflate"
-version = "0.3.7"
-source = "git+https://github.com/fintelia/fdeflate#1ccfcd4355dab1346b4aa13063386ee375d0fccf"
 dependencies = [
  "simd-adler32",
 ]
@@ -904,7 +896,7 @@ dependencies = [
 name = "inflate"
 version = "0.1.0"
 dependencies = [
- "fdeflate 0.3.7 (git+https://github.com/fintelia/fdeflate)",
+ "fdeflate 0.4.0",
  "flate2",
  "harness",
  "libdeflater",
@@ -1229,7 +1221,7 @@ checksum = "97baced388464909d42d89643fe4361939af9b7ce7a31ee32a168f832a70f2a0"
 dependencies = [
  "bitflags 2.9.4",
  "crc32fast",
- "fdeflate 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fdeflate 0.3.7",
  "flate2",
  "miniz_oxide",
 ]

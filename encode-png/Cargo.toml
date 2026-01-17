@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 image = { version = "0.25.6", default-features = false, features = ["png"] }
-png = "0.18.0-rc.3"
+png = { git = "https://github.com/fintelia/image-png", branch = "fdeflate-0.4.0" }
 harness = { path = "../harness" }
 flate2 = { version = "1.1.2", features = ["zlib"] }
 qoi = "0.4.1"

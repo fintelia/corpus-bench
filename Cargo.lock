@@ -305,7 +305,7 @@ dependencies = [
 name = "deflate"
 version = "0.1.0"
 dependencies = [
- "fdeflate",
+ "fdeflate 0.3.7 (git+https://github.com/fintelia/fdeflate)",
  "flate2",
  "harness",
  "libdeflater",
@@ -353,7 +353,7 @@ dependencies = [
  "harness",
  "image",
  "libz-sys",
- "png",
+ "png 0.18.0 (git+https://github.com/fintelia/image-png?branch=fdeflate-0.4.0)",
  "qoi",
 ]
 
@@ -397,6 +397,24 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 [[package]]
 name = "fdeflate"
 version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
+dependencies = [
+ "simd-adler32",
+]
+
+[[package]]
+name = "fdeflate"
+version = "0.3.7"
+source = "git+https://github.com/fintelia/fdeflate#1ccfcd4355dab1346b4aa13063386ee375d0fccf"
+dependencies = [
+ "simd-adler32",
+]
+
+[[package]]
+name = "fdeflate"
+version = "0.4.0"
+source = "git+https://github.com/image-rs/fdeflate#cf822db11ed98acc0c810a105e8230731f6df0df"
 dependencies = [
  "simd-adler32",
 ]
@@ -845,7 +863,7 @@ dependencies = [
  "image-webp",
  "moxcms",
  "num-traits",
- "png",
+ "png 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "qoi",
 ]
 
@@ -886,7 +904,7 @@ dependencies = [
 name = "inflate"
 version = "0.1.0"
 dependencies = [
- "fdeflate",
+ "fdeflate 0.3.7 (git+https://github.com/fintelia/fdeflate)",
  "flate2",
  "harness",
  "libdeflater",
@@ -1206,10 +1224,24 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 [[package]]
 name = "png"
 version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97baced388464909d42d89643fe4361939af9b7ce7a31ee32a168f832a70f2a0"
 dependencies = [
  "bitflags 2.9.4",
  "crc32fast",
- "fdeflate",
+ "fdeflate 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "flate2",
+ "miniz_oxide",
+]
+
+[[package]]
+name = "png"
+version = "0.18.0"
+source = "git+https://github.com/fintelia/image-png?branch=fdeflate-0.4.0#857d09f370c5ff9f28f7193278348e276d90a7f5"
+dependencies = [
+ "bitflags 2.9.4",
+ "crc32fast",
+ "fdeflate 0.4.0",
  "flate2",
  "miniz_oxide",
 ]

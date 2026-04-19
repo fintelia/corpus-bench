@@ -1,3 +1,7 @@
+
+**This project has migrated to Codeberg: https://codeberg.org/fintelia/corpus-bench**
+
+---
 # Corpus Bench
 
 A rust utility to measure the encoding and decoding performance of various image
